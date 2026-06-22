@@ -1,0 +1,37 @@
+# Flutter
+.dart_tool/
+.buildlog/
+.packages
+.pub/
+.pub-cache/
+.idea/
+.vs/
+*.iml
+*.ipr
+*.iws
+
+# Generated files
+build/
+.flutter-plugins
+.flutter-plugins-dependencies
+.flutter-versions
+.generated/
+
+# Local files
+.gradle/
+/local.properties
+
+# Android
+**/android/local.properties
+**/android/app/google-services.json
+**/android/app/debug.keystore
+
+# iOS
+**/ios/Flutter/Flutter.podspec
+**/ios/Podfile.lock
+**/ios/Pods/
+**/ios/Runner.xcworkspace/
+**/ios/Flutter/Flutter.framework
+
+# VS Code
+.vscode/
