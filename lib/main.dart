@@ -11,7 +11,10 @@ void main() async {
       providers: [
         Provider<AudioHandlerImpl>(create: (_) => audioHandler),
       ],
-      child: const EclipseShellApp(),
+      child: const MaterialApp(
+        debugShowCheckedModeBanner: false,
+        home: EclipseShellApp(),
+      ),
     ),
   );
 }
