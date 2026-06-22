@@ -9,7 +9,7 @@ void main() async {
   runApp(
     MultiProvider(
       providers: [
-        ChangeNotifierProvider(create: (_) => audioHandler),
+        Provider<AudioHandlerImpl>(create: (_) => audioHandler),
       ],
       child: const EclipseShellApp(),
     ),

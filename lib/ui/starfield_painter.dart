@@ -1,7 +1,7 @@
 import 'dart:math';
 import 'package:flutter/material.dart';
 
-class _StarfieldPainter extends CustomPainter {
+class StarfieldPainter extends CustomPainter {
   final Random _rng = Random(12345);
 
   @override
