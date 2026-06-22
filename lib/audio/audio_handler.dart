@@ -190,12 +190,13 @@ class AudioHandlerImpl extends ChangeNotifier {
     notifyListeners();
   }
 
-  String? _defaultScanRoot() {
-    if (Platform.isAndroid) {
-      return '/storage/emulated/0/EclipseMusic';
+  Future<void> toggleShuffle() async {
+    _isShuffle = !_isShuffle;
+    await _player.setShuffleModeEnabled(_isShuffle);
+    if (_isShuffle) {
+      await _player.shuffle();
     }
-    final home = Platform.environment['HOME'] ?? Platform.environment['USERPROFILE'] ?? '.';
-    return '$home/EclipseMusic';
+    notifyListeners();
   }
 
   Map<String, String>? _readId3v1(String path) {

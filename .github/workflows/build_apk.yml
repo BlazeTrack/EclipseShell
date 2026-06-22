@@ -26,9 +26,8 @@ jobs:
         with:
           channel: 'stable'
 
-      - name: 4. Generar o actualizar el proyecto Android
+      - name: 4. Obtener dependencias del proyecto
         run: |
-          flutter create . --platforms=android --org com.example
           flutter pub get
 
       - name: 5. Compilar APK
