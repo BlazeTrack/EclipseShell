@@ -3,6 +3,7 @@ import 'dart:math';
 
 import 'package:file_selector/file_selector.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 import '../audio/audio_handler.dart';
 import 'starfield_painter.dart'; // Importación vital para el fondo animado
@@ -14,11 +15,31 @@ class EclipseShellApp extends StatefulWidget {
   State<EclipseShellApp> createState() => _EclipseShellAppState();
 }
 
-class _EclipseShellAppState extends State<EclipseShellApp> {
+class _EclipseShellAppState extends State<EclipseShellApp> with WidgetsBindingObserver {
   List<Offset>? _stars;
   Size? _lastSize;
   Offset? _eclipseCenter;
   double? _eclipseRadius;
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addObserver(this);
+    SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
+    }
+  }
 
   void _initializeStars(Size size) {
     if (_lastSize == size) return;
@@ -100,8 +121,8 @@ class _EclipseShellAppState extends State<EclipseShellApp> {
                         ),
                       ),
                       const SizedBox(height: 12),
-                      SizedBox(
-                        height: 280,
+                                  SizedBox(
+                        height: 220,
                         child: _buildWindow(
                           title: 'PLAYCONTROL',
                           child: _buildPlayControl(),
@@ -240,9 +261,9 @@ class _EclipseShellAppState extends State<EclipseShellApp> {
               ),
             ],
           ),
-          const SizedBox(height: 16),
+          const SizedBox(height: 6),
           Row(
-            mainAxisAlignment: MainAxisAlignment.spaceAround,
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
               IconButton(
                 onPressed: audioHandler.skipToPrevious,
@@ -253,7 +274,7 @@ class _EclipseShellAppState extends State<EclipseShellApp> {
                 icon: Icon(
                   audioHandler.isPlaying ? Icons.pause_circle : Icons.play_circle,
                   color: Colors.white,
-                  size: 42,
+                  size: 40,
                 ),
               ),
               IconButton(
@@ -262,7 +283,7 @@ class _EclipseShellAppState extends State<EclipseShellApp> {
               ),
             ],
           ),
-          const SizedBox(height: 12),
+          const SizedBox(height: 4),
           StreamBuilder<Duration>(
             stream: audioHandler.positionStream,
             builder: (context, snapshotPos) {
@@ -280,7 +301,7 @@ class _EclipseShellAppState extends State<EclipseShellApp> {
                     activeColor: Colors.cyanAccent,
                     inactiveColor: Colors.white12,
                   ),
-                  const SizedBox(height: 6),
+                  const SizedBox(height: 4),
                   Row(
                     mainAxisAlignment: MainAxisAlignment.spaceBetween,
                     children: [
@@ -303,7 +324,6 @@ class _EclipseShellAppState extends State<EclipseShellApp> {
               const SizedBox(width: 12),
               ElevatedButton.icon(
                 onPressed: () async {
-                  // Trigger automatic scan
                   final found = await audioHandler.scanAndAddCommonDirs();
                   if (!mounted) return;
                   ScaffoldMessenger.of(context).showSnackBar(

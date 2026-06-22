@@ -22,16 +22,19 @@ class AudioHandlerImpl extends ChangeNotifier {
     _player.playerStateStream.listen((_) => notifyListeners());
     _player.currentIndexStream.listen((_) => notifyListeners());
     _player.positionStream.listen((_) => notifyListeners());
+    // Prepare the audio source before adding persisted files so playIndex can work later.
+    await _player.setAudioSource(_playlist);
     // Load persisted playlist
     _loadingFromStorage = true;
     final box = Hive.box<List>('playlist');
     final storedRaw = box.get('default');
-    final stored = (storedRaw is List) ? storedRaw.cast<String>() : <String>[];
+    final stored = storedRaw is List
+        ? List<String>.from(storedRaw.whereType<String>())
+        : <String>[];
     if (stored.isNotEmpty) {
       await addFiles(stored, persist: false);
     }
     _loadingFromStorage = false;
-    await _player.setAudioSource(_playlist);
   }
 
   List<String> get queue => List.unmodifiable(_paths);
