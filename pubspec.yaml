@@ -17,6 +17,7 @@ dependencies:
   
   # Para solicitar permisos de lectura de archivos locales
   permission_handler: ^11.3.1
+  file_picker: ^5.4.0
 dev_dependencies:
   flutter_test:
     sdk: flutter

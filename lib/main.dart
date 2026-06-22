@@ -5,13 +5,13 @@ import 'ui/eclipse_shell_app.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  final audioHandler = await AudioHandlerImpl.init();
   runApp(
     MultiProvider(
       providers: [
-        Provider<AudioHandlerImpl>(create: (_) => audioHandler),
+        ChangeNotifierProvider(create: (_) => AudioHandlerImpl()),
       ],
       child: const MaterialApp(
+        title: 'EclipseShell',
         debugShowCheckedModeBanner: false,
         home: EclipseShellApp(),
       ),
