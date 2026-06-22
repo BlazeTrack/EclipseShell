@@ -4,10 +4,7 @@ on:
   push:
     branches:
       - main
-  pull_request:
-    branches:
-      - main
-  workflow_dispatch: # Esto te permite activar la compilación manualmente desde la web de GitHub
+  workflow_dispatch:
 
 jobs:
   build:
@@ -17,30 +14,26 @@ jobs:
       - name: 1. Descargar el código del repositorio
         uses: actions/checkout@v4
 
-      - name: 2. Configurar Java JDK 17 (Requerido para Gradle moderno)
+      - name: 2. Configurar Java JDK 17 (Sin búsqueda de caché)
         uses: actions/setup-java@v4
         with:
           distribution: 'temurin'
           java-version: '17'
-          cache: 'gradle' # Acelera futuras compilaciones guardando caché
+          # Eliminamos el parámetro de caché automático para evitar el fallo de rutas
 
       - name: 3. Configurar el entorno de Flutter
         uses: subosito/flutter-action@v2
         with:
           channel: 'stable'
-          cache: true # Guarda en caché el SDK de Flutter
 
-      - name: 4. Limpiar y descargar dependencias de audio
-        run: |
-          flutter pub get
+      - name: 4. Descargar dependencias de audio
+        run: flutter pub get
 
-      - name: 5. Compilar instalador APK de manera limpia
-        run: |
-          flutter build apk --release --no-pub
+      - name: 5. Crear estructura nativa y compilar APK
+        run: flutter build apk --release
 
-      - name: 6. Subir el APK generado a la pestaña de artefactos
+      - name: 6. Guardar el APK terminado
         uses: actions/upload-artifact@v4
         with:
           name: EclipseShell-Release-APK
           path: build/app/outputs/flutter-apk/app-release.apk
-          if-no-files-found: error
