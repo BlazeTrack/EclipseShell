@@ -1,4 +1,4 @@
-name: Build APK
+name: Compilar EclipseShell APK
 
 on:
   push:
@@ -7,84 +7,40 @@ on:
   pull_request:
     branches:
       - main
+  workflow_dispatch: # Esto te permite activar la compilación manualmente desde la web de GitHub
 
 jobs:
   build:
     runs-on: ubuntu-latest
-    env:
-      ANDROID_SDK_ROOT: /usr/local/lib/android/sdk
-      ANDROID_HOME: /usr/local/lib/android/sdk
-      PATH: /usr/local/lib/android/sdk/platform-tools:/usr/local/lib/android/sdk/cmdline-tools/latest/bin:${{ github.workspace }}:/usr/local/bin:$PATH
 
     steps:
-      - name: Checkout repository
+      - name: 1. Descargar el código del repositorio
         uses: actions/checkout@v4
 
-      - name: Install machine dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y git unzip xz-utils libglu1-mesa
-
-      - name: Cache Flutter SDK and pub cache
-        uses: actions/cache@v4
+      - name: 2. Configurar Java JDK 17 (Requerido para Gradle moderno)
+        uses: actions/setup-java@v4
         with:
-          path: |
-            ${{ runner.temp }}/flutter
-            ~/.pub-cache
-          key: ${{ runner.os }}-flutter-${{ hashFiles('**/pubspec.yaml') }}
-          restore-keys: |
-            ${{ runner.os }}-flutter-
+          distribution: 'temurin'
+          java-version: '17'
+          cache: 'gradle' # Acelera futuras compilaciones guardando caché
 
-      - name: Install Flutter SDK from source
-        run: |
-          export FLUTTER_ROOT=${{ runner.temp }}/flutter
-          if [ ! -d "$FLUTTER_ROOT" ]; then
-            git clone --depth 1 --branch stable https://github.com/flutter/flutter.git "$FLUTTER_ROOT"
-          fi
-          export PATH="$FLUTTER_ROOT/bin:$PATH"
-          flutter --version
-          flutter precache --android --linux
-        shell: bash
+      - name: 3. Configurar el entorno de Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: 'stable'
+          cache: true # Guarda en caché el SDK de Flutter
 
-      - name: Ensure Flutter project skeleton
+      - name: 4. Limpiar y descargar dependencias de audio
         run: |
-          export FLUTTER_ROOT=${{ runner.temp }}/flutter
-          export PATH="$FLUTTER_ROOT/bin:$PATH"
-          if [ ! -d android ]; then
-            flutter create . --org com.blazetrack.eclipse_shell --project-name eclipse_shell --platforms android
-          fi
-        shell: bash
-
-      - name: Install dependencies
-        run: |
-          export FLUTTER_ROOT=${{ runner.temp }}/flutter
-          export PATH="$FLUTTER_ROOT/bin:$PATH"
           flutter pub get
-        shell: bash
 
-      - name: Analyze project
+      - name: 5. Compilar instalador APK de manera limpia
         run: |
-          export FLUTTER_ROOT=${{ runner.temp }}/flutter
-          export PATH="$FLUTTER_ROOT/bin:$PATH"
-          flutter analyze
-        shell: bash
+          flutter build apk --release --no-pub
 
-      - name: Accept Android licenses
-        run: |
-          export FLUTTER_ROOT=${{ runner.temp }}/flutter
-          export PATH="$FLUTTER_ROOT/bin:$PATH"
-          yes | flutter doctor --android-licenses
-        shell: bash
-
-      - name: Build APK
-        run: |
-          export FLUTTER_ROOT=${{ runner.temp }}/flutter
-          export PATH="$FLUTTER_ROOT/bin:$PATH"
-          flutter build apk --release --split-per-abi
-        shell: bash
-
-      - name: Upload APK artifacts
+      - name: 6. Subir el APK generado a la pestaña de artefactos
         uses: actions/upload-artifact@v4
         with:
-          name: eclipse-shell-apk
-          path: build/app/outputs/flutter-apk/*.apk
+          name: EclipseShell-Release-APK
+          path: build/app/outputs/flutter-apk/app-release.apk
+          if-no-files-found: error
