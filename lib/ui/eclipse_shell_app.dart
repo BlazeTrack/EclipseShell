@@ -294,22 +294,58 @@ class _EclipseShellAppState extends State<EclipseShellApp> with WidgetsBindingOb
                 iconSize: 26,
                 padding: const EdgeInsets.all(6),
               ),
-              ElevatedButton.icon(
-                onPressed: () async {
-                  final found = await audioHandler.scanAndAddCommonDirs();
-                  if (!mounted) return;
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    SnackBar(content: Text('Scan completed: ${found.length} tracks found')),
-                  );
-                },
-                icon: const Icon(Icons.search, size: 18),
-                label: const Text('Scan library', style: TextStyle(fontSize: 12)),
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: const Color(0xFF1A264F),
-                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                ),
+              Row(
+                children: [
+                  ElevatedButton.icon(
+                    onPressed: () async {
+                      final selectedRoot = await audioHandler.pickScanRoot();
+                      if (!mounted) return;
+                      if (selectedRoot == null || selectedRoot.isEmpty) {
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          const SnackBar(content: Text('No se seleccionó carpeta')),
+                        );
+                        return;
+                      }
+                      final found = await audioHandler.scanAndAddRoot(rootOverride: selectedRoot);
+                      if (!mounted) return;
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        SnackBar(content: Text('Scan completed: ${found.length} tracks found in $selectedRoot')),
+                      );
+                    },
+                    icon: const Icon(Icons.folder_open, size: 18),
+                    label: const Text('Seleccionar carpeta', style: TextStyle(fontSize: 12)),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: const Color(0xFF1A264F),
+                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  ElevatedButton.icon(
+                    onPressed: () async {
+                      final found = await audioHandler.scanAndAddRoot();
+                      if (!mounted) return;
+                      final root = audioHandler.scanRoot ?? '/storage/emulated/0/EclipseMusic';
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        SnackBar(content: Text('Scan completed: ${found.length} tracks found in $root')),
+                      );
+                    },
+                    icon: const Icon(Icons.search, size: 18),
+                    label: const Text('Escanear carpeta', style: TextStyle(fontSize: 12)),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: const Color(0xFF1A264F),
+                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                    ),
+                  ),
+                ],
               ),
             ],
+          ),
+          const SizedBox(height: 4),
+          Text(
+            audioHandler.scanRoot != null
+                ? 'Carpeta actual: ${audioHandler.scanRoot}'
+                : 'Carpeta por defecto: /storage/emulated/0/EclipseMusic',
+            style: const TextStyle(color: Colors.white54, fontSize: 11),
           ),
           const SizedBox(height: 4),
           StreamBuilder<Duration>(

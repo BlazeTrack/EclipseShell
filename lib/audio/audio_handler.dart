@@ -3,6 +3,7 @@ import 'dart:io';
 
 import 'package:flutter/foundation.dart' show ChangeNotifier, compute;
 import 'package:just_audio/just_audio.dart';
+import 'package:file_selector/file_selector.dart';
 import 'package:hive_flutter/hive_flutter.dart';
 import '../utils/scanner.dart';
 
@@ -13,6 +14,7 @@ class AudioHandlerImpl extends ChangeNotifier {
   final List<Map<String, dynamic>> _metadata = [];
   bool _loadingFromStorage = false;
   bool _isShuffle = false;
+  String? _scanRoot;
 
   AudioHandlerImpl() {
     _initialize();
@@ -22,15 +24,20 @@ class AudioHandlerImpl extends ChangeNotifier {
     _player.playerStateStream.listen((_) => notifyListeners());
     _player.currentIndexStream.listen((_) => notifyListeners());
     _player.positionStream.listen((_) => notifyListeners());
-    // Load persisted playlist
+    // Load persisted playlist and scan root
     _loadingFromStorage = true;
-    final box = Hive.box<List>('playlist');
-    final storedRaw = box.get('default');
+    final playlistBox = Hive.box<List>('playlist');
+    final storedRaw = playlistBox.get('default');
     final stored = storedRaw is List
         ? List<String>.from(storedRaw.whereType<String>())
         : <String>[];
     if (stored.isNotEmpty) {
       await addFiles(stored, persist: false);
+    }
+    final settingsBox = Hive.box('settings');
+    final storedScanRoot = settingsBox.get('scanRoot');
+    if (storedScanRoot is String && storedScanRoot.isNotEmpty) {
+      _scanRoot = storedScanRoot;
     }
     await _player.setAudioSource(_playlist);
     _loadingFromStorage = false;
@@ -71,6 +78,42 @@ class AudioHandlerImpl extends ChangeNotifier {
     if (_loadingFromStorage) return;
     final box = Hive.box<List>('playlist');
     await box.put('default', _paths);
+  }
+
+  Future<void> setScanRoot(String path) async {
+    _scanRoot = path;
+    final settingsBox = Hive.box('settings');
+    await settingsBox.put('scanRoot', path);
+    notifyListeners();
+  }
+
+  String? get scanRoot => _scanRoot;
+
+  Future<List<String>> scanAndAddRoot({String? rootOverride}) async {
+    final rootPath = rootOverride ?? _scanRoot ?? _defaultScanRoot();
+    if (rootPath == null) return <String>[];
+    if (_scanRoot == null) {
+      await setScanRoot(rootPath);
+    }
+    final found = await compute(scanDirectoryPaths, rootPath);
+    await addFiles(found);
+    return found;
+  }
+
+  Future<String?> pickScanRoot() async {
+    final selected = await getDirectoryPath();
+    if (selected != null && selected.isNotEmpty) {
+      await setScanRoot(selected);
+    }
+    return selected;
+  }
+
+  String? _defaultScanRoot() {
+    if (Platform.isAndroid) {
+      return '/storage/emulated/0/EclipseMusic';
+    }
+    final home = Platform.environment['HOME'] ?? Platform.environment['USERPROFILE'] ?? '.';
+    return '$home/EclipseMusic';
   }
 
   Future<void> addFiles(List<String> paths, {bool persist = true}) async {
@@ -147,33 +190,12 @@ class AudioHandlerImpl extends ChangeNotifier {
     notifyListeners();
   }
 
-  Future<void> toggleShuffle() async {
-    _isShuffle = !_isShuffle;
-    await _player.setShuffleModeEnabled(_isShuffle);
-    notifyListeners();
-  }
-
-  Future<List<String>> scanAndAddCommonDirs() async {
-    final roots = <String>[];
-    try {
-      if (Platform.isAndroid) {
-        roots.add('/storage/emulated/0/Music');
-        roots.add('/storage/emulated/0/Download');
-      } else {
-        final home = Platform.environment['HOME'] ?? Platform.environment['USERPROFILE'] ?? '.';
-        roots.add('$home/Music');
-        roots.add('$home/Downloads');
-      }
-      final found = <String>[];
-      for (final root in roots) {
-        final result = await compute(scanDirectoryPaths, root);
-        found.addAll(result);
-      }
-      await addFiles(found);
-      return found;
-    } catch (e) {
-      return <String>[];
+  String? _defaultScanRoot() {
+    if (Platform.isAndroid) {
+      return '/storage/emulated/0/EclipseMusic';
     }
+    final home = Platform.environment['HOME'] ?? Platform.environment['USERPROFILE'] ?? '.';
+    return '$home/EclipseMusic';
   }
 
   Map<String, String>? _readId3v1(String path) {

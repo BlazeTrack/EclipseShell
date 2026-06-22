@@ -11,6 +11,7 @@ void main() async {
   await Hive.initFlutter();
   await Hive.openBox<List>('playlist');
   await Hive.openBox('metadata');
+  await Hive.openBox('settings');
   runApp(
     MultiProvider(
       providers: [
