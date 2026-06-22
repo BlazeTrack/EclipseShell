@@ -1,6 +1,5 @@
 ﻿import 'dart:io';
 
-import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../audio/audio_handler.dart';
@@ -122,19 +121,13 @@ class _EclipseShellAppState extends State<EclipseShellApp> {
         ),
         const SizedBox(height: 8),
         ElevatedButton.icon(
-          onPressed: () async {
-            final hasPermission = await audioHandler.requestStoragePermission();
-            if (!hasPermission) {
-              if (!mounted) return;
-              ScaffoldMessenger.of(context).showSnackBar(
-                const SnackBar(content: Text('Se necesita permiso de almacenamiento para seleccionar archivos.')),
-              );
-              return;
-            }
-            final result = await FilePicker.platform.pickFiles(type: FileType.audio, allowMultiple: true);
-            if (result != null && result.paths.isNotEmpty) {
-              await audioHandler.addFiles(result.paths.whereType<String>().toList());
-            }
+          onPressed: () {
+            if (!mounted) return;
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(
+                content: Text('La selección de archivos está deshabilitada temporalmente debido a la compatibilidad del plugin.'),
+              ),
+            );
           },
           icon: const Icon(Icons.folder_open),
           label: const Text('Agregar pistas'),
