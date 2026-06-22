@@ -25,7 +25,8 @@ class AudioHandlerImpl extends ChangeNotifier {
     // Load persisted playlist
     _loadingFromStorage = true;
     final box = Hive.box<List>('playlist');
-    final stored = box.get('default') ?? <String>[];
+    final storedRaw = box.get('default');
+    final stored = (storedRaw is List) ? storedRaw.cast<String>() : <String>[];
     if (stored.isNotEmpty) {
       await addFiles(stored, persist: false);
     }
