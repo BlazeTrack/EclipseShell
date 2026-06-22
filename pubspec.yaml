@@ -9,14 +9,13 @@ dependencies:
   flutter:
     sdk: flutter
   
-  # Versiones estables y armonizadas para evitar conflictos en la nube
+  # Combinación exacta y equilibrada sugerida por el compilador
   just_audio: 0.9.40
-  audio_session: 0.1.21
+  audio_session: 0.1.25
   audio_service: 0.18.18
   
   # Para solicitar permisos de lectura de archivos locales
   permission_handler: ^11.3.1
-
 dev_dependencies:
   flutter_test:
     sdk: flutter
