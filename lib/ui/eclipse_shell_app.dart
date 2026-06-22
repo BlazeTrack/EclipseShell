@@ -1,5 +1,6 @@
-﻿import 'dart:io';
+﻿import 'dart:math';
 
+import 'package:file_selector/file_selector.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../audio/audio_handler.dart';
@@ -13,52 +14,78 @@ class EclipseShellApp extends StatefulWidget {
 }
 
 class _EclipseShellAppState extends State<EclipseShellApp> {
+  List<Offset>? _stars;
+  Size? _lastSize;
+  Offset? _eclipseCenter;
+  double? _eclipseRadius;
+
+  void _initializeStars(Size size) {
+    if (_lastSize == size) return;
+    _lastSize = size;
+    final rng = Random(12345);
+    _stars = List.generate(
+      120,
+      (_) => Offset(rng.nextDouble() * size.width, rng.nextDouble() * size.height),
+    );
+    _eclipseCenter = Offset(size.width * 0.8, size.height * 0.2);
+    _eclipseRadius = size.width * 0.18;
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: const Color(0xFF02030A),
-      body: Stack(
-        children: [
-          Positioned.fill(
-            child: Container(
-              decoration: const BoxDecoration(
-                gradient: LinearGradient(
-                  begin: Alignment.topCenter,
-                  end: Alignment.bottomCenter,
-                  colors: [Color(0xFF02030A), Color(0xFF050818), Color(0xFF11172F)],
+      body: LayoutBuilder(
+        builder: (context, constraints) {
+          _initializeStars(constraints.biggest);
+          return Stack(
+            children: [
+              Positioned.fill(
+                child: Container(
+                  decoration: const BoxDecoration(
+                    gradient: LinearGradient(
+                      begin: Alignment.topCenter,
+                      end: Alignment.bottomCenter,
+                      colors: [Color(0xFF02030A), Color(0xFF050818), Color(0xFF11172F)],
+                    ),
+                  ),
                 ),
               ),
-            ),
-          ),
-          Positioned.fill(
-            child: CustomPaint(
-              painter: StarfieldPainter(),
-            ),
-          ),
-          SafeArea(
-            child: Padding(
-              padding: const EdgeInsets.all(12),
-              child: Column(
-                children: [
-                  Expanded(
-                    child: _buildWindow(
-                      title: 'ECLIPSESHELL FILE EXPLORER',
-                      child: _buildFileExplorer(),
-                    ),
+              Positioned.fill(
+                child: CustomPaint(
+                  painter: StarfieldPainter(
+                    stars: _stars!,
+                    eclipseCenter: _eclipseCenter!,
+                    eclipseRadius: _eclipseRadius!,
                   ),
-                  const SizedBox(height: 12),
-                  SizedBox(
-                    height: 280,
-                    child: _buildWindow(
-                      title: 'PLAYCONTROL',
-                      child: _buildPlayControl(),
-                    ),
-                  ),
-                ],
+                ),
               ),
-            ),
-          ),
-        ],
+              SafeArea(
+                child: Padding(
+                  padding: const EdgeInsets.all(12),
+                  child: Column(
+                    children: [
+                      Expanded(
+                        child: _buildWindow(
+                          title: 'ECLIPSESHELL FILE EXPLORER',
+                          child: _buildFileExplorer(),
+                        ),
+                      ),
+                      const SizedBox(height: 12),
+                      SizedBox(
+                        height: 280,
+                        child: _buildWindow(
+                          title: 'PLAYCONTROL',
+                          child: _buildPlayControl(),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ],
+          );
+        },
       ),
     );
   }
@@ -121,13 +148,16 @@ class _EclipseShellAppState extends State<EclipseShellApp> {
         ),
         const SizedBox(height: 8),
         ElevatedButton.icon(
-          onPressed: () {
-            if (!mounted) return;
-            ScaffoldMessenger.of(context).showSnackBar(
-              const SnackBar(
-                content: Text('La selección de archivos está deshabilitada temporalmente debido a la compatibilidad del plugin.'),
-              ),
+          onPressed: () async {
+            final typeGroup = XTypeGroup(
+              label: 'audio',
+              extensions: ['mp3', 'wav', 'm4a', 'aac', 'flac', 'ogg'],
             );
+            final files = await openFiles(acceptedTypeGroups: [typeGroup]);
+            if (files.isEmpty) return;
+            final paths = files.map((file) => file.path).whereType<String>().toList();
+            if (paths.isEmpty) return;
+            await audioHandler.addFiles(paths);
           },
           icon: const Icon(Icons.folder_open),
           label: const Text('Agregar pistas'),

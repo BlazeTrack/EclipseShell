@@ -2,7 +2,6 @@
 
 import 'package:flutter/foundation.dart';
 import 'package:just_audio/just_audio.dart';
-import 'package:permission_handler/permission_handler.dart';
 
 class AudioHandlerImpl extends ChangeNotifier {
   final AudioPlayer _player = AudioPlayer();
@@ -35,14 +34,6 @@ class AudioHandlerImpl extends ChangeNotifier {
   Duration get position => _player.position;
 
   Duration get duration => _player.duration ?? Duration.zero;
-
-  Future<bool> requestStoragePermission() async {
-    if (Platform.isAndroid || Platform.isIOS) {
-      final status = await Permission.storage.request();
-      return status.isGranted;
-    }
-    return true;
-  }
 
   Future<void> addFiles(List<String> paths) async {
     for (final path in paths) {
