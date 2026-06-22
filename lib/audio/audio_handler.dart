@@ -22,8 +22,6 @@ class AudioHandlerImpl extends ChangeNotifier {
     _player.playerStateStream.listen((_) => notifyListeners());
     _player.currentIndexStream.listen((_) => notifyListeners());
     _player.positionStream.listen((_) => notifyListeners());
-    // Prepare the audio source before adding persisted files so playIndex can work later.
-    await _player.setAudioSource(_playlist);
     // Load persisted playlist
     _loadingFromStorage = true;
     final box = Hive.box<List>('playlist');
@@ -34,6 +32,7 @@ class AudioHandlerImpl extends ChangeNotifier {
     if (stored.isNotEmpty) {
       await addFiles(stored, persist: false);
     }
+    await _player.setAudioSource(_playlist);
     _loadingFromStorage = false;
   }
 

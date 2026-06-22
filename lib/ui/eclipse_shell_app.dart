@@ -84,10 +84,10 @@ class _EclipseShellAppState extends State<EclipseShellApp> with WidgetsBindingOb
               ),
               SafeArea(
                 child: Padding(
-                  padding: const EdgeInsets.all(12),
+                  padding: const EdgeInsets.all(8),
                   child: Column(
                     children: [
-                      const SizedBox(height: 6),
+                      const SizedBox(height: 4),
                       Center(
                         child: ConstrainedBox(
                           constraints: const BoxConstraints(maxWidth: 520),
@@ -113,16 +113,17 @@ class _EclipseShellAppState extends State<EclipseShellApp> with WidgetsBindingOb
                           ),
                         ),
                       ),
-                      const SizedBox(height: 8),
-                      Expanded(
+                      const SizedBox(height: 4),
+                      Flexible(
+                        flex: 5,
                         child: _buildWindow(
                           title: 'ECLIPSESHELL FILE EXPLORER',
                           child: _buildFileExplorer(),
                         ),
                       ),
-                      const SizedBox(height: 12),
-                                  SizedBox(
-                        height: 220,
+                      const SizedBox(height: 8),
+                      Flexible(
+                        flex: 4,
                         child: _buildWindow(
                           title: 'PLAYCONTROL',
                           child: _buildPlayControl(),
@@ -284,6 +285,33 @@ class _EclipseShellAppState extends State<EclipseShellApp> with WidgetsBindingOb
             ],
           ),
           const SizedBox(height: 4),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              IconButton(
+                onPressed: () async => await audioHandler.toggleShuffle(),
+                icon: Icon(audioHandler.isShuffle ? Icons.shuffle_on : Icons.shuffle, color: Colors.white),
+                iconSize: 26,
+                padding: const EdgeInsets.all(6),
+              ),
+              ElevatedButton.icon(
+                onPressed: () async {
+                  final found = await audioHandler.scanAndAddCommonDirs();
+                  if (!mounted) return;
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(content: Text('Scan completed: ${found.length} tracks found')),
+                  );
+                },
+                icon: const Icon(Icons.search, size: 18),
+                label: const Text('Scan library', style: TextStyle(fontSize: 12)),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: const Color(0xFF1A264F),
+                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 4),
           StreamBuilder<Duration>(
             stream: audioHandler.positionStream,
             builder: (context, snapshotPos) {
@@ -301,7 +329,7 @@ class _EclipseShellAppState extends State<EclipseShellApp> with WidgetsBindingOb
                     activeColor: Colors.cyanAccent,
                     inactiveColor: Colors.white12,
                   ),
-                  const SizedBox(height: 4),
+                  const SizedBox(height: 3),
                   Row(
                     mainAxisAlignment: MainAxisAlignment.spaceBetween,
                     children: [
@@ -312,29 +340,6 @@ class _EclipseShellAppState extends State<EclipseShellApp> with WidgetsBindingOb
                 ],
               );
             },
-          ),
-          const SizedBox(height: 8),
-          Row(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              IconButton(
-                onPressed: () async => await audioHandler.toggleShuffle(),
-                icon: Icon(audioHandler.isShuffle ? Icons.shuffle_on : Icons.shuffle, color: Colors.white),
-              ),
-              const SizedBox(width: 12),
-              ElevatedButton.icon(
-                onPressed: () async {
-                  final found = await audioHandler.scanAndAddCommonDirs();
-                  if (!mounted) return;
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    SnackBar(content: Text('Scan completed: ${found.length} tracks found')),
-                  );
-                },
-                icon: const Icon(Icons.search),
-                label: const Text('Scan library'),
-                style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF1A264F)),
-              ),
-            ],
           ),
         ],
       ),
