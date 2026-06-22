@@ -11,7 +11,7 @@ EclipseShell es un reproductor de música local con estética inspirada en MoonS
 - Interfaz estilo MoonShell: fondo estrellado, ventanas tipo retro y controles de reproducción sencillos.
 - Explorador básico de pistas y controles de reproducción (play/pause/skip/seek).
 
-**Características actuales**
+**Características actuales (descatualizado)**
 
 - Reproducción local usando `just_audio`.
 - Cola dinámica y selección de pista para reproducir.

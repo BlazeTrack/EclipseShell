@@ -1,0 +1,8 @@
+<resources>
+    <style name="Theme.EclipseShell" parent="Theme.MaterialComponents.DayNight.NoActionBar">
+        <item name="android:windowBackground">@android:color/black</item>
+        <item name="android:navigationBarColor">#050818</item>
+        <item name="android:statusBarColor">#02030A</item>
+        <item name="android:windowLightStatusBar">false</item>
+    </style>
+</resources>

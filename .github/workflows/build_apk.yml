@@ -26,12 +26,12 @@ jobs:
         with:
           channel: 'stable'
 
-      - name: 4. Descargar dependencias de audio y crear entorno Android
+      - name: 4. Generar o actualizar el proyecto Android
         run: |
-          flutter create . --platforms=android --org com.eclipseshell
+          flutter create . --platforms=android --org com.example
           flutter pub get
 
-      - name: 5. Crear estructura nativa y compilar APK
+      - name: 5. Compilar APK
         run: |
           flutter build apk --release --no-pub
 
