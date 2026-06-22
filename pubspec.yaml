@@ -20,8 +20,7 @@ dependencies:
   hive: ^2.2.3
   hive_flutter: ^1.1.0
   path_provider: ^2.0.14
-  flutter_media_metadata: ^1.0.0+1
-  image: ^4.0.20
+  # metadata extraction removed for CI stability; falling back to ID3v1 parser
 dev_dependencies:
   flutter_test:
     sdk: flutter

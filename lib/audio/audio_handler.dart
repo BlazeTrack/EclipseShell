@@ -1,11 +1,8 @@
 ﻿import 'dart:async';
 import 'dart:io';
-import 'dart:typed_data';
 
 import 'package:flutter/foundation.dart' show ChangeNotifier, compute;
 import 'package:just_audio/just_audio.dart';
-import 'package:flutter_media_metadata/flutter_media_metadata.dart';
-import 'package:image/image.dart' as img;
 import 'package:hive_flutter/hive_flutter.dart';
 import '../utils/scanner.dart';
 
@@ -59,17 +56,6 @@ class AudioHandlerImpl extends ChangeNotifier {
     return _paths[idx].split(Platform.pathSeparator).last;
   }
 
-  Uint8List? get currentArtwork {
-    final index = _player.currentIndex;
-    if (index == null || index < 0 || index >= _paths.length) return null;
-    final path = _paths[index];
-    final box = Hive.box('artwork');
-    final bytes = box.get(path);
-    if (bytes == null) return null;
-    if (bytes is Uint8List) return bytes;
-    if (bytes is List<int>) return Uint8List.fromList(bytes);
-    return null;
-  }
 
   Stream<Duration> get positionStream => _player.positionStream;
   Stream<Duration?> get durationStream => _player.durationStream;
@@ -96,7 +82,7 @@ class AudioHandlerImpl extends ChangeNotifier {
         final stored = metaBox.get(path);
         if (stored is Map) meta = Map<String, dynamic>.from(stored);
       }
-      meta ??= await _readExtendedMetadata(path) ?? _readId3v1(path) ?? {'title': fileName};
+      meta ??= _readId3v1(path) ?? {'title': fileName};
       _metadata.add(meta);
       await _playlist.add(AudioSource.uri(Uri.file(path), tag: meta));
       // persist metadata per-file
@@ -111,43 +97,6 @@ class AudioHandlerImpl extends ChangeNotifier {
     }
   }
 
-  Future<Map<String, dynamic>?> _readExtendedMetadata(String path) async {
-    try {
-      final file = File(path);
-      if (!file.existsSync()) return null;
-      final metadata = await MetadataRetriever.fromFile(file);
-      final title = metadata.trackName ?? path.split(Platform.pathSeparator).last;
-      final artist = metadata.trackArtistNames?.join(', ') ?? metadata.artistName ?? '';
-      final album = metadata.albumName ?? '';
-      final art = metadata.albumArt; // Uint8List?
-      if (art != null && art.isNotEmpty) {
-        final box = Hive.box('artwork');
-        await box.put(path, art);
-      }
-      // generate and cache a smaller thumbnail to save memory / bandwidth
-      try {
-        if (art != null && art.isNotEmpty) {
-          final thumbBox = Hive.box('artwork_thumb');
-          // decode and resize using `image` package
-          final decoded = img.decodeImage(art);
-          if (decoded != null) {
-            final resized = img.copyResize(decoded, width: 128, height: 128);
-            final thumbBytes = Uint8List.fromList(img.encodeJpg(resized, quality: 80));
-            await thumbBox.put(path, thumbBytes);
-          }
-        }
-      } catch (_) {}
-      // also persist textual metadata
-      final metaBox = Hive.box('metadata');
-      final metaMap = {'title': title, 'artist': artist, 'album': album};
-      try {
-        await metaBox.put(path, metaMap);
-      } catch (_) {}
-      return {'title': title, 'artist': artist, 'album': album};
-    } catch (_) {
-      return null;
-    }
-  }
 
   Map<String, dynamic>? metadataForPath(String path) {
     final box = Hive.box('metadata');
@@ -157,24 +106,6 @@ class AudioHandlerImpl extends ChangeNotifier {
     return null;
   }
 
-  Uint8List? artworkForPath(String path) {
-    final box = Hive.box('artwork');
-    final bytes = box.get(path);
-    if (bytes == null) return null;
-    if (bytes is Uint8List) return bytes;
-    if (bytes is List<int>) return Uint8List.fromList(bytes);
-    return null;
-  }
-
-  Uint8List? artworkThumbForPath(String path) {
-    final box = Hive.box('artwork_thumb');
-    final bytes = box.get(path);
-    if (bytes == null) return null;
-    if (bytes is Uint8List) return bytes;
-    if (bytes is List<int>) return Uint8List.fromList(bytes);
-    // fallback to full artwork if no thumb
-    return artworkForPath(path);
-  }
 
   Future<void> play() async {
     await _player.play();

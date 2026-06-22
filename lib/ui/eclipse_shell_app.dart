@@ -164,7 +164,6 @@ class _EclipseShellAppState extends State<EclipseShellApp> {
                     final meta = audioHandler.metadataForPath(path) ?? {'title': path.split(Platform.pathSeparator).last};
                     final title = meta['title'] ?? path.split(Platform.pathSeparator).last;
                     final isActive = audioHandler.currentTitle == title;
-                    final art = audioHandler.artworkThumbForPath(path) ?? audioHandler.artworkForPath(path);
                     return ListTile(
                       title: Text(
                         title,
@@ -174,12 +173,7 @@ class _EclipseShellAppState extends State<EclipseShellApp> {
                           ? Text(meta['artist'], style: const TextStyle(color: Colors.white54, fontSize: 12))
                           : null,
                       onTap: () => audioHandler.playIndex(index),
-                      leading: art != null
-                          ? ClipRRect(
-                              borderRadius: BorderRadius.circular(6),
-                              child: Image.memory(art, width: 48, height: 48, fit: BoxFit.cover),
-                            )
-                          : Icon(Icons.music_note, color: isActive ? Colors.cyanAccent : Colors.white70),
+                      leading: Icon(Icons.music_note, color: isActive ? Colors.cyanAccent : Colors.white70),
                       trailing: isActive ? const Icon(Icons.play_arrow, color: Colors.cyanAccent) : null,
                     );
                   },
@@ -217,27 +211,13 @@ class _EclipseShellAppState extends State<EclipseShellApp> {
           const SizedBox(height: 8),
           Row(
             children: [
-              if (audioHandler.currentArtwork != null)
-                Container(
-                  width: 56,
-                  height: 56,
-                  margin: const EdgeInsets.only(right: 12),
-                  child: ClipRRect(
-                    borderRadius: BorderRadius.circular(6),
-                    child: Image.memory(
-                      audioHandler.currentArtwork!,
-                      fit: BoxFit.cover,
-                    ),
-                  ),
-                )
-              else
-                Container(
-                  width: 56,
-                  height: 56,
-                  margin: const EdgeInsets.only(right: 12),
-                  decoration: BoxDecoration(color: Colors.white12, borderRadius: BorderRadius.circular(6)),
-                  child: const Icon(Icons.music_note, color: Colors.white70),
-                ),
+              Container(
+                width: 56,
+                height: 56,
+                margin: const EdgeInsets.only(right: 12),
+                decoration: BoxDecoration(color: Colors.white12, borderRadius: BorderRadius.circular(6)),
+                child: const Icon(Icons.music_note, color: Colors.white70),
+              ),
               Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,

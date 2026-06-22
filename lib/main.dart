@@ -8,9 +8,7 @@ void main() async {
   WidgetsFlutterBinding.ensureInitialized();
   await Hive.initFlutter();
   await Hive.openBox<List>('playlist');
-  await Hive.openBox('artwork');
   await Hive.openBox('metadata');
-  await Hive.openBox('artwork_thumb');
   runApp(
     MultiProvider(
       providers: [
