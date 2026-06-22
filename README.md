@@ -2,6 +2,9 @@
 
 EclipseShell es un reproductor de música local con estética inspirada en MoonShell (NDS). Su objetivo es ofrecer una experiencia visual retro y una reproducción suave de archivos locales, con una interfaz cuidada y controles tipo "ventana".
 
+<img width="584" height="1280" alt="image" src="https://github.com/user-attachments/assets/c0eaa9cd-212b-4cb9-a530-24d890a552ce" />
+<img width="354" height="644" alt="image" src="https://github.com/user-attachments/assets/25589846-4156-4a3f-8244-47a121f0f08d" />
+
 **Qué hace**
 
 - Reproduce archivos de audio locales en cola (gapless con `just_audio`).
