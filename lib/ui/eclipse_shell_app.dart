@@ -2,6 +2,7 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../audio/audio_handler.dart';
+import 'starfield_painter.dart';
 
 class EclipseShellApp extends StatelessWidget {
   const EclipseShellApp({super.key});
@@ -230,24 +231,25 @@ class _EclipseShellHomeState extends State<EclipseShellHome> {
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      decoration: BoxDecoration(
-        gradient: LinearGradient(
-          begin: Alignment.topCenter,
-          end: Alignment.bottomCenter,
-          colors: [
-            const Color(0xFF02030A),
-            const Color(0xFF090E20),
-            const Color(0xFF11172F),
-          ],
+    return Stack(
+      children: [
+        Positioned.fill(
+          child: Container(
+            decoration: const BoxDecoration(
+              gradient: LinearGradient(
+                begin: Alignment.topCenter,
+                end: Alignment.bottomCenter,
+                colors: [Color(0xFF02030A), Color(0xFF050818), Color(0xFF11172F)],
+              ),
+            ),
+          ),
         ),
-        image: const DecorationImage(
-          image: AssetImage(''),
-          fit: BoxFit.cover,
-          opacity: 0.0,
+        Positioned.fill(
+          child: CustomPaint(
+            painter: _StarfieldPainter(),
+          ),
         ),
-      ),
-      child: SafeArea(
+        SafeArea(
         child: Padding(
           padding: const EdgeInsets.all(12),
           child: Column(
