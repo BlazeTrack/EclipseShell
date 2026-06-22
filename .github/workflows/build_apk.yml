@@ -11,41 +11,77 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
+    env:
+      ANDROID_SDK_ROOT: /usr/local/lib/android/sdk
+      ANDROID_HOME: /usr/local/lib/android/sdk
+      PATH: /usr/local/lib/android/sdk/platform-tools:/usr/local/lib/android/sdk/cmdline-tools/latest/bin:${{ github.workspace }}:/usr/local/bin:$PATH
 
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Setup Flutter
-        uses: flutter/setup-flutter@v2
-        with:
-          flutter-version: 'stable'
-          cache: true
+      - name: Install machine dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y git unzip xz-utils libglu1-mesa
 
-      - name: Cache pub dependencies
+      - name: Cache Flutter SDK and pub cache
         uses: actions/cache@v4
         with:
           path: |
+            ${{ runner.temp }}/flutter
             ~/.pub-cache
-            ~/.flutter
           key: ${{ runner.os }}-flutter-${{ hashFiles('**/pubspec.yaml') }}
           restore-keys: |
             ${{ runner.os }}-flutter-
 
+      - name: Install Flutter SDK from source
+        run: |
+          export FLUTTER_ROOT=${{ runner.temp }}/flutter
+          if [ ! -d "$FLUTTER_ROOT" ]; then
+            git clone --depth 1 --branch stable https://github.com/flutter/flutter.git "$FLUTTER_ROOT"
+          fi
+          export PATH="$FLUTTER_ROOT/bin:$PATH"
+          flutter --version
+          flutter precache --android --linux
+        shell: bash
+
       - name: Ensure Flutter project skeleton
         run: |
+          export FLUTTER_ROOT=${{ runner.temp }}/flutter
+          export PATH="$FLUTTER_ROOT/bin:$PATH"
           if [ ! -d android ]; then
             flutter create . --org com.blazetrack.eclipse_shell --project-name eclipse_shell --platforms android
           fi
+        shell: bash
 
       - name: Install dependencies
-        run: flutter pub get
+        run: |
+          export FLUTTER_ROOT=${{ runner.temp }}/flutter
+          export PATH="$FLUTTER_ROOT/bin:$PATH"
+          flutter pub get
+        shell: bash
 
       - name: Analyze project
-        run: flutter analyze
+        run: |
+          export FLUTTER_ROOT=${{ runner.temp }}/flutter
+          export PATH="$FLUTTER_ROOT/bin:$PATH"
+          flutter analyze
+        shell: bash
+
+      - name: Accept Android licenses
+        run: |
+          export FLUTTER_ROOT=${{ runner.temp }}/flutter
+          export PATH="$FLUTTER_ROOT/bin:$PATH"
+          yes | flutter doctor --android-licenses
+        shell: bash
 
       - name: Build APK
-        run: flutter build apk --release --split-per-abi
+        run: |
+          export FLUTTER_ROOT=${{ runner.temp }}/flutter
+          export PATH="$FLUTTER_ROOT/bin:$PATH"
+          flutter build apk --release --split-per-abi
+        shell: bash
 
       - name: Upload APK artifacts
         uses: actions/upload-artifact@v4
