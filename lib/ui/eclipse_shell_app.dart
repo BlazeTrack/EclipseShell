@@ -66,6 +66,33 @@ class _EclipseShellAppState extends State<EclipseShellApp> {
                   padding: const EdgeInsets.all(12),
                   child: Column(
                     children: [
+                      const SizedBox(height: 6),
+                      Center(
+                        child: ConstrainedBox(
+                          constraints: const BoxConstraints(maxWidth: 520),
+                          child: TextField(
+                            readOnly: true,
+                            decoration: InputDecoration(
+                              hintText: 'Buscar...',
+                              hintStyle: TextStyle(color: Colors.white54),
+                              prefixIcon: Icon(Icons.search, color: Colors.white54),
+                              filled: true,
+                              fillColor: Color(0xFF0B1226),
+                              contentPadding: EdgeInsets.symmetric(vertical: 12.0, horizontal: 12.0),
+                              border: OutlineInputBorder(
+                                borderRadius: BorderRadius.circular(8.0),
+                                borderSide: BorderSide(color: Color(0xFF3A4B7C)),
+                              ),
+                              enabledBorder: OutlineInputBorder(
+                                borderRadius: BorderRadius.circular(8.0),
+                                borderSide: BorderSide(color: Color(0xFF3A4B7C)),
+                              ),
+                            ),
+                            style: const TextStyle(color: Colors.white),
+                          ),
+                        ),
+                      ),
+                      const SizedBox(height: 8),
                       Expanded(
                         child: _buildWindow(
                           title: 'ECLIPSESHELL FILE EXPLORER',
