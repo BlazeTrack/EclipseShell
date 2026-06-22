@@ -13,6 +13,7 @@ dependencies:
   just_audio: 0.9.40
   audio_session: 0.1.25
   audio_service: 0.18.18
+  provider: ^6.1.2
   
   # Para solicitar permisos de lectura de archivos locales
   permission_handler: ^11.3.1
