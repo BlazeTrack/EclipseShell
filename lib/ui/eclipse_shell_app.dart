@@ -1,4 +1,5 @@
-﻿import 'dart:math';
+﻿import 'dart:io';
+import 'dart:math';
 
 import 'package:file_selector/file_selector.dart';
 import 'package:flutter/material.dart';
@@ -132,15 +133,26 @@ class _EclipseShellAppState extends State<EclipseShellApp> {
               : ListView.builder(
                   itemCount: audioHandler.queue.length,
                   itemBuilder: (context, index) {
-                    final title = audioHandler.queue[index];
+                    final path = audioHandler.queue[index];
+                    final meta = audioHandler.metadataForPath(path) ?? {'title': path.split(Platform.pathSeparator).last};
+                    final title = meta['title'] ?? path.split(Platform.pathSeparator).last;
                     final isActive = audioHandler.currentTitle == title;
+                    final art = audioHandler.artworkThumbForPath(path) ?? audioHandler.artworkForPath(path);
                     return ListTile(
                       title: Text(
                         title,
                         style: TextStyle(color: isActive ? Colors.cyanAccent : Colors.white70),
                       ),
+                      subtitle: (meta['artist'] != null && (meta['artist'] as String).isNotEmpty)
+                          ? Text(meta['artist'], style: const TextStyle(color: Colors.white54, fontSize: 12))
+                          : null,
                       onTap: () => audioHandler.playIndex(index),
-                      leading: Icon(Icons.music_note, color: isActive ? Colors.cyanAccent : Colors.white70),
+                      leading: art != null
+                          ? ClipRRect(
+                              borderRadius: BorderRadius.circular(6),
+                              child: Image.memory(art, width: 48, height: 48, fit: BoxFit.cover),
+                            )
+                          : Icon(Icons.music_note, color: isActive ? Colors.cyanAccent : Colors.white70),
                       trailing: isActive ? const Icon(Icons.play_arrow, color: Colors.cyanAccent) : null,
                     );
                   },
@@ -176,11 +188,50 @@ class _EclipseShellAppState extends State<EclipseShellApp> {
         children: [
           const Text('Reproduciendo', style: TextStyle(color: Colors.white70, fontWeight: FontWeight.bold)),
           const SizedBox(height: 8),
-          Text(
-            audioHandler.currentTitle,
-            style: const TextStyle(color: Colors.white, fontSize: 16),
-            maxLines: 2,
-            overflow: TextOverflow.ellipsis,
+          Row(
+            children: [
+              if (audioHandler.currentArtwork != null)
+                Container(
+                  width: 56,
+                  height: 56,
+                  margin: const EdgeInsets.only(right: 12),
+                  child: ClipRRect(
+                    borderRadius: BorderRadius.circular(6),
+                    child: Image.memory(
+                      audioHandler.currentArtwork!,
+                      fit: BoxFit.cover,
+                    ),
+                  ),
+                )
+              else
+                Container(
+                  width: 56,
+                  height: 56,
+                  margin: const EdgeInsets.only(right: 12),
+                  decoration: BoxDecoration(color: Colors.white12, borderRadius: BorderRadius.circular(6)),
+                  child: const Icon(Icons.music_note, color: Colors.white70),
+                ),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      audioHandler.currentMetadata['title'] ?? 'Sin pista seleccionada',
+                      style: const TextStyle(color: Colors.white, fontSize: 16),
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      '${audioHandler.currentMetadata['artist'] ?? ''} · ${audioHandler.currentMetadata['album'] ?? ''}',
+                      style: const TextStyle(color: Colors.white70, fontSize: 12),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ],
+                ),
+              ),
+            ],
           ),
           const SizedBox(height: 16),
           Row(
@@ -205,19 +256,57 @@ class _EclipseShellAppState extends State<EclipseShellApp> {
             ],
           ),
           const SizedBox(height: 12),
-          LinearProgressIndicator(
-            value: audioHandler.duration.inMilliseconds == 0
-                ? 0
-                : audioHandler.position.inMilliseconds / audioHandler.duration.inMilliseconds,
-            color: Colors.cyanAccent,
-            backgroundColor: Colors.white12,
+          StreamBuilder<Duration>(
+            stream: audioHandler.positionStream,
+            builder: (context, snapshotPos) {
+              final pos = snapshotPos.data ?? Duration.zero;
+              final dur = audioHandler.duration;
+              final value = dur.inMilliseconds == 0 ? 0.0 : pos.inMilliseconds / dur.inMilliseconds;
+              return Column(
+                children: [
+                  Slider(
+                    value: value.clamp(0.0, 1.0),
+                    onChanged: (v) {
+                      final target = Duration(milliseconds: (v * dur.inMilliseconds).round());
+                      audioHandler.seekTo(target);
+                    },
+                    activeColor: Colors.cyanAccent,
+                    inactiveColor: Colors.white12,
+                  ),
+                  const SizedBox(height: 6),
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      Text(_formatDuration(pos), style: const TextStyle(color: Colors.white70, fontSize: 12)),
+                      Text(_formatDuration(dur), style: const TextStyle(color: Colors.white70, fontSize: 12)),
+                    ],
+                  ),
+                ],
+              );
+            },
           ),
-          const SizedBox(height: 6),
+          const SizedBox(height: 8),
           Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            mainAxisAlignment: MainAxisAlignment.center,
             children: [
-              Text(_formatDuration(audioHandler.position), style: const TextStyle(color: Colors.white70, fontSize: 12)),
-              Text(_formatDuration(audioHandler.duration), style: const TextStyle(color: Colors.white70, fontSize: 12)),
+              IconButton(
+                onPressed: () async => await audioHandler.toggleShuffle(),
+                icon: Icon(audioHandler.isShuffle ? Icons.shuffle_on : Icons.shuffle, color: Colors.white),
+              ),
+              const SizedBox(width: 12),
+              ElevatedButton.icon(
+                onPressed: () async {
+                  // Trigger automatic scan
+                  final found = await audioHandler.scanAndAddCommonDirs();
+                  if (!mounted) return;
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(content: Text('Scan completed: ${found.length} tracks found')),
+                  );
+                },
+                icon: const Icon(Icons.search),
+                label: const Text('Scan library'),
+                style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF1A264F)),
+              ),
             ],
           ),
         ],
