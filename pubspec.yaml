@@ -20,7 +20,9 @@ dependencies:
   hive: ^2.2.3
   hive_flutter: ^1.1.0
   path_provider: ^2.0.14
-  # metadata extraction removed for CI stability; falling back to ID3v1 parser
+  # Runtime storage/media permissions required to scan local folders.
+  permission_handler: ^11.3.1
+  # Album art / tags extracted with a pure-Dart ID3 parser (no native dep) for CI stability.
 dev_dependencies:
   flutter_test:
     sdk: flutter

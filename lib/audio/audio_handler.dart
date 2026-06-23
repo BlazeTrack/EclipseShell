@@ -5,7 +5,10 @@ import 'package:flutter/foundation.dart' show ChangeNotifier, compute;
 import 'package:just_audio/just_audio.dart';
 import 'package:file_selector/file_selector.dart';
 import 'package:hive_flutter/hive_flutter.dart';
+import 'package:path_provider/path_provider.dart';
+import 'package:permission_handler/permission_handler.dart';
 import '../utils/scanner.dart';
+import '../utils/metadata.dart';
 
 class AudioHandlerImpl extends ChangeNotifier {
   final AudioPlayer _player = AudioPlayer();
@@ -15,6 +18,8 @@ class AudioHandlerImpl extends ChangeNotifier {
   bool _loadingFromStorage = false;
   bool _isShuffle = false;
   String? _scanRoot;
+  String? _artDir;
+  bool lastScanPermissionDenied = false;
 
   AudioHandlerImpl() {
     _initialize();
@@ -24,7 +29,26 @@ class AudioHandlerImpl extends ChangeNotifier {
     _player.playerStateStream.listen((_) => notifyListeners());
     _player.currentIndexStream.listen((_) => notifyListeners());
     _player.positionStream.listen((_) => notifyListeners());
-    // Load persisted playlist and scan root
+
+    try {
+      final dir = await getTemporaryDirectory();
+      _artDir = '${dir.path}/eclipse_art';
+      await Directory(_artDir!).create(recursive: true);
+    } catch (_) {}
+
+    // Attach the (empty) playlist to the player BEFORE restoring tracks so that
+    // later additions are live and playable. Restoring before this left the
+    // player without a usable source, so saved tracks would not play after a
+    // restart.
+    await _player.setAudioSource(_playlist);
+
+    final settingsBox = Hive.box('settings');
+    final storedScanRoot = settingsBox.get('scanRoot');
+    if (storedScanRoot is String && storedScanRoot.isNotEmpty) {
+      _scanRoot = storedScanRoot;
+    }
+
+    // Restore the saved playlist without auto-playing it.
     _loadingFromStorage = true;
     final playlistBox = Hive.box<List>('playlist');
     final storedRaw = playlistBox.get('default');
@@ -32,15 +56,10 @@ class AudioHandlerImpl extends ChangeNotifier {
         ? List<String>.from(storedRaw.whereType<String>())
         : <String>[];
     if (stored.isNotEmpty) {
-      await addFiles(stored, persist: false);
+      await addFiles(stored, persist: false, autoPlay: false);
     }
-    final settingsBox = Hive.box('settings');
-    final storedScanRoot = settingsBox.get('scanRoot');
-    if (storedScanRoot is String && storedScanRoot.isNotEmpty) {
-      _scanRoot = storedScanRoot;
-    }
-    await _player.setAudioSource(_playlist);
     _loadingFromStorage = false;
+    notifyListeners();
   }
 
   List<String> get queue => List.unmodifiable(_paths);
@@ -90,6 +109,13 @@ class AudioHandlerImpl extends ChangeNotifier {
   String? get scanRoot => _scanRoot;
 
   Future<List<String>> scanAndAddRoot({String? rootOverride}) async {
+    lastScanPermissionDenied = false;
+    final granted = await _ensureStoragePermission();
+    if (!granted) {
+      lastScanPermissionDenied = true;
+      notifyListeners();
+      return <String>[];
+    }
     final rootPath = rootOverride ?? _scanRoot ?? _defaultScanRoot();
     if (rootPath == null) return <String>[];
     if (_scanRoot == null) {
@@ -100,23 +126,52 @@ class AudioHandlerImpl extends ChangeNotifier {
     return found;
   }
 
+  Future<bool> _ensureStoragePermission() async {
+    if (!Platform.isAndroid) return true;
+    if (await Permission.manageExternalStorage.isGranted) return true;
+    // Granular media permission (Android 13+) and legacy storage (<=12).
+    final audio = await Permission.audio.request();
+    final storage = await Permission.storage.request();
+    // All-files access is required to read arbitrary folders by raw path.
+    final manage = await Permission.manageExternalStorage.request();
+    return manage.isGranted || audio.isGranted || storage.isGranted;
+  }
+
   Future<String?> pickScanRoot() async {
     final selected = await getDirectoryPath();
     if (selected != null && selected.isNotEmpty) {
-      await setScanRoot(selected);
+      final normalized = _normalizeAndroidDirPath(selected);
+      await setScanRoot(normalized);
+      return normalized;
     }
     return selected;
   }
 
+  // file_selector may return a Storage Access Framework tree URI on Android
+  // (e.g. content://.../tree/primary:Music/Sub). Convert it to a raw filesystem
+  // path so the recursive scanner can read it.
+  String _normalizeAndroidDirPath(String p) {
+    if (!Platform.isAndroid) return p;
+    final decoded = Uri.decodeFull(p);
+    final match = RegExp(r'tree/([^:/]+):(.*)$').firstMatch(decoded);
+    if (match != null) {
+      final volume = match.group(1)!;
+      final rel = match.group(2) ?? '';
+      final base = volume == 'primary' ? '/storage/emulated/0' : '/storage/$volume';
+      return '$base/$rel'.replaceAll(RegExp(r'/+$'), '');
+    }
+    return p;
+  }
+
   String? _defaultScanRoot() {
     if (Platform.isAndroid) {
-      return '/storage/emulated/0/EclipseMusic';
+      return '/storage/emulated/0/Download/EclipseMusic';
     }
     final home = Platform.environment['HOME'] ?? Platform.environment['USERPROFILE'] ?? '.';
     return '$home/EclipseMusic';
   }
 
-  Future<void> addFiles(List<String> paths, {bool persist = true}) async {
+  Future<void> addFiles(List<String> paths, {bool persist = true, bool autoPlay = true}) async {
     for (final path in paths) {
       if (path.isEmpty) continue;
       if (_paths.contains(path)) continue;
@@ -124,11 +179,11 @@ class AudioHandlerImpl extends ChangeNotifier {
       _paths.add(path);
       final metaBox = Hive.box('metadata');
       Map<String, dynamic>? meta;
-      if (!persist && metaBox.containsKey(path)) {
+      if (metaBox.containsKey(path)) {
         final stored = metaBox.get(path);
         if (stored is Map) meta = Map<String, dynamic>.from(stored);
       }
-      meta ??= _readId3v1(path) ?? {'title': fileName};
+      meta ??= _buildMetadata(path, fileName);
       _metadata.add(meta);
       await _playlist.add(AudioSource.uri(Uri.file(path), tag: meta));
       // persist metadata per-file
@@ -138,9 +193,27 @@ class AudioHandlerImpl extends ChangeNotifier {
     }
     notifyListeners();
     if (persist) await _persist();
-    if (!_player.playing && _paths.isNotEmpty) {
+    if (autoPlay && !_player.playing && _paths.isNotEmpty) {
       await playIndex(_paths.length - 1);
     }
+  }
+
+  Map<String, dynamic> _buildMetadata(String path, String fileName) {
+    final tags = readTrackTags(path);
+    final meta = <String, dynamic>{
+      'title': tags.title ?? fileName,
+      'artist': tags.artist ?? '',
+      'album': tags.album ?? '',
+    };
+    final art = tags.artwork;
+    if (art != null && art.isNotEmpty && _artDir != null) {
+      try {
+        final artFile = File('$_artDir/${path.hashCode}.img');
+        artFile.writeAsBytesSync(art, flush: true);
+        meta['artPath'] = artFile.path;
+      } catch (_) {}
+    }
+    return meta;
   }
 
 
@@ -190,37 +263,13 @@ class AudioHandlerImpl extends ChangeNotifier {
     notifyListeners();
   }
 
-  String? _defaultScanRoot() {
-    if (Platform.isAndroid) {
-      return '/storage/emulated/0/EclipseMusic';
+  Future<void> toggleShuffle() async {
+    _isShuffle = !_isShuffle;
+    await _player.setShuffleModeEnabled(_isShuffle);
+    if (_isShuffle) {
+      await _player.shuffle();
     }
-    final home = Platform.environment['HOME'] ?? Platform.environment['USERPROFILE'] ?? '.';
-    return '$home/EclipseMusic';
-  }
-
-  Map<String, String>? _readId3v1(String path) {
-    try {
-      final file = File(path);
-      if (!file.existsSync()) return null;
-      final raf = file.openSync(mode: FileMode.read);
-      final len = raf.lengthSync();
-      if (len < 128) {
-        raf.closeSync();
-        return null;
-      }
-      raf.setPositionSync(len - 128);
-      final bytes = raf.readSync(128);
-      raf.closeSync();
-      final tag = String.fromCharCodes(bytes.sublist(0, 3));
-      if (tag != 'TAG') return null;
-      String readString(List<int> b) => String.fromCharCodes(b).trim().replaceAll('\u0000', '');
-      final title = readString(bytes.sublist(3, 33));
-      final artist = readString(bytes.sublist(33, 63));
-      final album = readString(bytes.sublist(63, 93));
-      return {'title': title.isNotEmpty ? title : path.split(Platform.pathSeparator).last, 'artist': artist, 'album': album};
-    } catch (_) {
-      return null;
-    }
+    notifyListeners();
   }
 
   @override
