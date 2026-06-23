@@ -11,7 +11,7 @@ class EclipseShellApp extends StatelessWidget {
     final audioHandler = Provider.of<AudioHandlerImpl>(context);
 
     return Scaffold(
-      backgroundColor: const Color(0xFF121212), // Estilo oscuro de alta fidelidad
+      backgroundColor: const Color(0xFF121212),
       appBar: AppBar(
         title: const Text('Eclipse Shell Player', style: TextStyle(fontFamily: 'monospace')),
         backgroundColor: const Color(0xFF1E1E1E),
@@ -19,16 +19,13 @@ class EclipseShellApp extends StatelessWidget {
         actions: [
           IconButton(
             icon: const Icon(Icons.folder_open, color: Colors.cyanAccent),
-            onPressed: () {
-              // Aquí puedes integrar tu file_selector más adelante
-            },
+            onPressed: () {},
           )
         ],
       ),
       body: SafeArea(
         child: Column(
           children: [
-            // Pantalla de Información del Track actual
             Expanded(
               flex: 4,
               child: StreamBuilder<MediaItem?>(
@@ -65,8 +62,6 @@ class EclipseShellApp extends StatelessWidget {
                 },
               ),
             ),
-
-            // Controles de Reproducción y Modos (Sección corregida estructuralmente)
             Expanded(
               flex: 3,
               child: Container(
@@ -77,23 +72,17 @@ class EclipseShellApp extends StatelessWidget {
                     return Column(
                       mainAxisAlignment: MainAxisAlignment.center,
                       children: [
-                        // Botones de control secuencial e interactivo
                         Row(
                           mainAxisAlignment: MainAxisAlignment.spaceEvenly,
                           children: [
-                            // Botón de Modo Aleatorio (Shuffle)
                             IconButton(
                               icon: const Icon(Icons.shuffle, color: Colors.grey),
                               onPressed: () async => await audioHandler.toggleShuffle(),
                             ),
-
-                            // Pista Anterior
                             IconButton(
                               icon: const Icon(Icons.skip_previous, size: 36, color: Colors.white),
                               onPressed: () async => await audioHandler.skipToPrevious(),
                             ),
-
-                            // Play / Pause central dinámico
                             StreamBuilder<PlaybackState>(
                               stream: audioHandler.playbackState,
                               builder: (context, snapshot) {
@@ -110,14 +99,10 @@ class EclipseShellApp extends StatelessWidget {
                                 );
                               },
                             ),
-
-                            // Siguiente Pista
                             IconButton(
                               icon: const Icon(Icons.skip_next, size: 36, color: Colors.white),
                               onPressed: () async => await audioHandler.skipToNext(),
                             ),
-
-                            // Menú desplegable para LoopMode limpio de errores sintácticos
                             PopupMenuButton<LoopMode>(
                               initialValue: audioHandler.loopMode,
                               onSelected: (LoopMode mode) async {
@@ -138,11 +123,9 @@ class EclipseShellApp extends StatelessWidget {
                                 ),
                               ],
                               child: Icon(
-                                audioHandler.loopMode == LoopMode.all
-                                    ? Icons.repeat
-                                    : audioHandler.loopMode == LoopMode.once
-                                        ? Icons.repeat_one
-                                        : Icons.repeat_with_type,
+                                audioHandler.loopMode == LoopMode.once
+                                    ? Icons.repeat_one
+                                    : Icons.repeat,
                                 color: audioHandler.loopMode != LoopMode.off ? Colors.cyanAccent : Colors.grey,
                               ),
                             ),

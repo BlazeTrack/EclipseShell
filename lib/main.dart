@@ -15,7 +15,7 @@ void main() async {
   runApp(
     MultiProvider(
       providers: [
-        ChangeNotifierProvider(create: (_) => AudioHandlerImpl()),
+       Provider<AudioHandlerImpl>(create: (_) => AudioHandlerImpl()),
       ],
       child: const MaterialApp(
         title: 'EclipseShell',
