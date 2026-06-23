@@ -1,11 +1,10 @@
 ﻿import 'package:just_audio/just_audio.dart';
 import 'package:audio_service/audio_service.dart';
 
-// 1. CORREGIDO: El Enum ahora está fuera de la clase (Top-level)
+// El enum se declara a nivel global fuera de la clase
 enum LoopMode { off, once, all }
 
 class AudioHandlerImpl extends BaseAudioHandler with QueueHandler, SeekHandler {
-  // 2. CORREGIDO: Tipos de just_audio reconocidos correctamente
   final AudioPlayer _player = AudioPlayer();
   final ConcatenatingAudioSource _playlist = ConcatenatingAudioSource(children: []);
   
@@ -17,7 +16,15 @@ class AudioHandlerImpl extends BaseAudioHandler with QueueHandler, SeekHandler {
   }
 
   void _init() {
-    // Escuchar cambios de estado u otras inicializaciones
+    // Transmitir los estados de reproducción nativos hacia el sistema operativo
+    _player.playbackEventStream.map(_transformEvent).pipe(playbackState);
+    
+    // Escuchar el cambio automático de pistas para actualizar el índice actual
+    _player.currentIndexStream.listen((index) {
+      if (index != null && queue.value.isNotEmpty) {
+        mediaItem.add(queue.value[index]);
+      }
+    });
   }
 
   Future<void> setLoopMode(LoopMode mode) async {
@@ -33,26 +40,32 @@ class AudioHandlerImpl extends BaseAudioHandler with QueueHandler, SeekHandler {
         await _player.setLoopMode(com.justaudio.LoopMode.all);
         break;
     }
+    // Forzar actualización en la UI notificando cambios
+    playbackState.add(playbackState.value.copyWith());
   }
 
-  // 3. CORREGIDO: Método toggleShuffle añadido para evitar el error en la UI
   Future<void> toggleShuffle() async {
     final bool shuffleOn = !_player.shuffleModeEnabled;
     await _player.setShuffleModeEnabled(shuffleOn);
+    playbackState.add(playbackState.value.copyWith(
+      shuffleMode: shuffleOn ? AudioServiceShuffleMode.all : AudioServiceShuffleMode.none,
+    ));
   }
 
-  // Ejemplo de cómo agregar tracks a la playlist de forma segura
-  Future<void> addTrack(String path, MediaItem meta) async {
-    await _playlist.add(AudioSource.uri(Uri.file(path), tag: meta));
+  Future<void> loadPlaylist(List<MediaItem> items) async {
+    queue.add(items);
+    final sources = items.map((item) => AudioSource.uri(Uri.parse(item.id), tag: item)).toList();
+    _playlist.clear();
+    await _playlist.addAll(sources);
+    await _player.setAudioSource(_playlist);
   }
 
-  // 4. CORREGIDO: Única declaración de _defaultScanRoot (Eliminado el duplicado)
   String? _defaultScanRoot() {
-    // Tu lógica nativa para encontrar la ruta raíz de la música
-    return null; 
+    // Raíz de escaneo por defecto de archivos locales
+    return '/storage/emulated/0/Music';
   }
 
-  // Implementaciones requeridas por BaseAudioHandler
+  // Mapeos nativos obligatorios para el ciclo de vida de audio_service
   @override
   Future<void> play() => _player.play();
 
@@ -61,4 +74,24 @@ class AudioHandlerImpl extends BaseAudioHandler with QueueHandler, SeekHandler {
 
   @override
   Future<void> stop() => _player.stop();
-}
+
+  @override
+  Future<void> skipToNext() => _player.seekToNext();
+
+  @override
+  Future<void> skipToPrevious() => _player.seekToPrevious();
+
+  @override
+  Future<void> seek(Duration position) => _player.seek(position);
+
+  PlaybackState _transformEvent(PlaybackEvent event) {
+    return PlaybackState(
+      controls: [
+        MediaControl.skipToPrevious,
+        if (_player.playing) MediaControl.pause else MediaControl.play,
+        MediaControl.stop,
+        MediaControl.skipToNext,
+      ],
+      systemActions: const {
+        MediaAction.seek,
+        MediaAction.seekForward
