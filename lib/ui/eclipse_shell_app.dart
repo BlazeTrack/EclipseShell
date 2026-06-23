@@ -195,7 +195,11 @@ class _EclipseShellAppState extends State<EclipseShellApp> with WidgetsBindingOb
                           ? Text(meta['artist'], style: const TextStyle(color: Colors.white54, fontSize: 12))
                           : null,
                       onTap: () => audioHandler.playIndex(index),
-                      leading: Icon(Icons.music_note, color: isActive ? Colors.cyanAccent : Colors.white70),
+                      leading: _trackArt(
+                        meta['artPath'] as String?,
+                        size: 40,
+                        iconColor: isActive ? Colors.cyanAccent : Colors.white70,
+                      ),
                       trailing: isActive ? const Icon(Icons.play_arrow, color: Colors.cyanAccent) : null,
                     );
                   },
@@ -237,8 +241,9 @@ class _EclipseShellAppState extends State<EclipseShellApp> with WidgetsBindingOb
                 width: 56,
                 height: 56,
                 margin: const EdgeInsets.only(right: 12),
+                clipBehavior: Clip.antiAlias,
                 decoration: BoxDecoration(color: Colors.white12, borderRadius: BorderRadius.circular(6)),
-                child: const Icon(Icons.music_note, color: Colors.white70),
+                child: _trackArt(audioHandler.currentMetadata['artPath'] as String?, size: 56),
               ),
               Expanded(
                 child: Column(
@@ -308,6 +313,12 @@ class _EclipseShellAppState extends State<EclipseShellApp> with WidgetsBindingOb
                       }
                       final found = await audioHandler.scanAndAddRoot(rootOverride: selectedRoot);
                       if (!mounted) return;
+                      if (audioHandler.lastScanPermissionDenied) {
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          const SnackBar(content: Text('Permiso de almacenamiento denegado. Actívalo para escanear.')),
+                        );
+                        return;
+                      }
                       ScaffoldMessenger.of(context).showSnackBar(
                         SnackBar(content: Text('Scan completed: ${found.length} tracks found in $selectedRoot')),
                       );
@@ -324,7 +335,13 @@ class _EclipseShellAppState extends State<EclipseShellApp> with WidgetsBindingOb
                     onPressed: () async {
                       final found = await audioHandler.scanAndAddRoot();
                       if (!mounted) return;
-                      final root = audioHandler.scanRoot ?? '/storage/emulated/0/EclipseMusic';
+                      if (audioHandler.lastScanPermissionDenied) {
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          const SnackBar(content: Text('Permiso de almacenamiento denegado. Actívalo para escanear.')),
+                        );
+                        return;
+                      }
+                      final root = audioHandler.scanRoot ?? '/storage/emulated/0/Download/EclipseMusic';
                       ScaffoldMessenger.of(context).showSnackBar(
                         SnackBar(content: Text('Scan completed: ${found.length} tracks found in $root')),
                       );
@@ -344,7 +361,7 @@ class _EclipseShellAppState extends State<EclipseShellApp> with WidgetsBindingOb
           Text(
             audioHandler.scanRoot != null
                 ? 'Carpeta actual: ${audioHandler.scanRoot}'
-                : 'Carpeta por defecto: /storage/emulated/0/EclipseMusic',
+                : 'Carpeta por defecto: /storage/emulated/0/Download/EclipseMusic',
             style: const TextStyle(color: Colors.white54, fontSize: 11),
           ),
           const SizedBox(height: 4),
@@ -380,6 +397,22 @@ class _EclipseShellAppState extends State<EclipseShellApp> with WidgetsBindingOb
         ],
       ),
     );
+  }
+
+  Widget _trackArt(String? artPath, {double size = 40, Color iconColor = Colors.white70}) {
+    if (artPath != null && artPath.isNotEmpty && File(artPath).existsSync()) {
+      return ClipRRect(
+        borderRadius: BorderRadius.circular(6),
+        child: Image.file(
+          File(artPath),
+          width: size,
+          height: size,
+          fit: BoxFit.cover,
+          errorBuilder: (_, __, ___) => Icon(Icons.music_note, color: iconColor, size: size * 0.55),
+        ),
+      );
+    }
+    return Icon(Icons.music_note, color: iconColor, size: size * 0.6);
   }
 
   String _formatDuration(Duration duration) {
