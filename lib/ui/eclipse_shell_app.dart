@@ -1,4 +1,5 @@
 ﻿import 'dart:io';
+
 import 'dart:math';
 
 import 'package:file_selector/file_selector.dart';
@@ -7,6 +8,8 @@ import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 import '../audio/audio_handler.dart';
 import 'starfield_painter.dart'; // Importación vital para el fondo animado
+import 'downloads_panel.dart';
+
 
 class EclipseShellApp extends StatefulWidget {
   const EclipseShellApp({Key? key}) : super(key: key);
@@ -16,6 +19,14 @@ class EclipseShellApp extends StatefulWidget {
 }
 
 class _EclipseShellAppState extends State<EclipseShellApp> with WidgetsBindingObserver {
+  Widget _buildThumbnail(Map<String, dynamic> meta) {
+    // Fallback genérico por ahora (fase 1). Más adelante se conectará a artwork real.
+    return Container(
+      color: Colors.white12,
+      child: const Icon(Icons.music_note, color: Colors.white70),
+    );
+  }
+
   List<Offset>? _stars;
   Size? _lastSize;
   Offset? _eclipseCenter;
@@ -88,12 +99,13 @@ class _EclipseShellAppState extends State<EclipseShellApp> with WidgetsBindingOb
                   child: Column(
                     children: [
                       const SizedBox(height: 4),
-                      Center(
-                        child: ConstrainedBox(
-                          constraints: const BoxConstraints(maxWidth: 520),
-                          child: TextField(
-                            readOnly: true,
-                            decoration: InputDecoration(
+                      Builder(builder: (context) {
+                        final audioHandler = Provider.of<AudioHandlerImpl>(context);
+                        return Center(
+                          child: ConstrainedBox(
+                            constraints: const BoxConstraints(maxWidth: 520),
+                            child: TextField(
+                              decoration: InputDecoration(
                               hintText: 'Buscar...',
                               hintStyle: TextStyle(color: Colors.white54),
                               prefixIcon: Icon(Icons.search, color: Colors.white54),
@@ -110,6 +122,7 @@ class _EclipseShellAppState extends State<EclipseShellApp> with WidgetsBindingOb
                               ),
                             ),
                             style: const TextStyle(color: Colors.white),
+                            onChanged: (v) => audioHandler.setLocalSearchQuery(v),
                           ),
                         ),
                       ),
@@ -127,6 +140,15 @@ class _EclipseShellAppState extends State<EclipseShellApp> with WidgetsBindingOb
                         child: _buildWindow(
                           title: 'PLAYCONTROL',
                           child: _buildPlayControl(),
+                        ),
+                      ),
+                      const SizedBox(height: 8),
+
+                      Flexible(
+                        flex: 6,
+                        child: _buildWindow(
+                          title: 'DESCARGAS',
+                          child: const DownloadsPanel(),
                         ),
                       ),
                     ],
@@ -170,6 +192,7 @@ class _EclipseShellAppState extends State<EclipseShellApp> with WidgetsBindingOb
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
+        const SizedBox(height: 2),
         Expanded(
           child: audioHandler.queue.isEmpty
               ? Center(
@@ -180,12 +203,14 @@ class _EclipseShellAppState extends State<EclipseShellApp> with WidgetsBindingOb
                   ),
                 )
               : ListView.builder(
-                  itemCount: audioHandler.queue.length,
+                  itemCount: audioHandler.filteredQueue.length,
                   itemBuilder: (context, index) {
-                    final path = audioHandler.queue[index];
+                    final path = audioHandler.filteredQueue[index];
                     final meta = audioHandler.metadataForPath(path) ?? {'title': path.split(Platform.pathSeparator).last};
                     final title = meta['title'] ?? path.split(Platform.pathSeparator).last;
-                    final isActive = audioHandler.currentTitle == title;
+                    final currentPath = audioHandler.currentPath;
+                    final isActive = currentPath != null && currentPath == path;
+
                     return ListTile(
                       title: Text(
                         title,
@@ -194,7 +219,7 @@ class _EclipseShellAppState extends State<EclipseShellApp> with WidgetsBindingOb
                       subtitle: (meta['artist'] != null && (meta['artist'] as String).isNotEmpty)
                           ? Text(meta['artist'], style: const TextStyle(color: Colors.white54, fontSize: 12))
                           : null,
-                      onTap: () => audioHandler.playIndex(index),
+                      onTap: () => audioHandler.playIndex(audioHandler.queue.indexOf(path)),
                       leading: Icon(Icons.music_note, color: isActive ? Colors.cyanAccent : Colors.white70),
                       trailing: isActive ? const Icon(Icons.play_arrow, color: Colors.cyanAccent) : null,
                     );
@@ -238,7 +263,10 @@ class _EclipseShellAppState extends State<EclipseShellApp> with WidgetsBindingOb
                 height: 56,
                 margin: const EdgeInsets.only(right: 12),
                 decoration: BoxDecoration(color: Colors.white12, borderRadius: BorderRadius.circular(6)),
-                child: const Icon(Icons.music_note, color: Colors.white70),
+                child: ClipRRect(
+                  borderRadius: BorderRadius.circular(6),
+                  child: _buildThumbnail(audioHandler.currentMetadata),
+                ),
               ),
               Expanded(
                 child: Column(
@@ -288,11 +316,36 @@ class _EclipseShellAppState extends State<EclipseShellApp> with WidgetsBindingOb
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              IconButton(
+                      IconButton(
                 onPressed: () async => await audioHandler.toggleShuffle(),
                 icon: Icon(audioHandler.isShuffle ? Icons.shuffle_on : Icons.shuffle, color: Colors.white),
                 iconSize: 26,
                 padding: const EdgeInsets.all(6),
+              ),
+              const SizedBox(width: 4),
+              PopupMenuButton<AudioHandlerImpl.LoopMode>(
+                initialValue: audioHandler.loopMode,
+                tooltip: 'Loop',
+                itemBuilder: (context) => [
+                  const PopupMenuItem(
+                    value: AudioHandlerImpl.LoopMode.off,
+                    child: Text('Una vez'),
+                  ),
+                  const PopupMenuItem(
+                    value: AudioHandlerImpl.LoopMode.all,
+                    child: Text('Loop todo'),
+                  ),
+                ],
+                onSelected: (mode) async {
+                  await audioHandler.setLoopMode(mode);
+                },
+                child: Icon(
+                  audioHandler.loopMode == AudioHandlerImpl.LoopMode.all
+                      ? Icons.repeat
+                      : Icons.repeat_one,
+                  color: Colors.white,
+                  size: 26,
+                ),
               ),
               Row(
                 children: [

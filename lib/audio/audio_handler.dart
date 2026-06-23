@@ -2,7 +2,7 @@
 import 'dart:io';
 
 import 'package:flutter/foundation.dart' show ChangeNotifier, compute;
-import 'package:just_audio/just_audio.dart';
+import 'package:just_audio/just_audio.dart' as just_audio;
 import 'package:file_selector/file_selector.dart';
 import 'package:hive_flutter/hive_flutter.dart';
 import '../utils/scanner.dart';
@@ -10,6 +10,35 @@ import '../utils/scanner.dart';
 class AudioHandlerImpl extends ChangeNotifier {
   final AudioPlayer _player = AudioPlayer();
   final ConcatenatingAudioSource _playlist = ConcatenatingAudioSource(children: []);
+
+  /// Looping del reproductor local.
+  /// - off: reproduce una vez (se detiene al final)
+  /// - all: loop de toda la cola
+  /// - once: sin cambios vs off, pero mantenemos nomenclatura para UI
+  LoopMode _loopMode = LoopMode.off;
+
+  LoopMode get loopMode => _loopMode;
+
+  Future<void> setLoopMode(LoopMode mode) async {
+    _loopMode = mode;
+    // JustAudio: `LoopMode.off` / `LoopMode.one` / `LoopMode.all`
+    // Para "una vez": off.
+    // Para "loop todo": all.
+    switch (_loopMode) {
+      case LoopMode.off:
+      case LoopMode.once:
+        await _player.setLoopMode(just_audio.LoopMode.off);
+        break;
+      case LoopMode.all:
+        await _player.setLoopMode(just_audio.LoopMode.all);
+        break;
+    }
+    notifyListeners();
+  }
+
+  /// Alias local para evitar confusión con LoopMode de just_audio (también existe).
+  /// Usamos nuestros valores y los map-eamos arriba.
+  enum LoopMode { off, once, all }
   final List<String> _paths = [];
   final List<Map<String, dynamic>> _metadata = [];
   bool _loadingFromStorage = false;
@@ -31,15 +60,33 @@ class AudioHandlerImpl extends ChangeNotifier {
     final stored = storedRaw is List
         ? List<String>.from(storedRaw.whereType<String>())
         : <String>[];
-    if (stored.isNotEmpty) {
-      await addFiles(stored, persist: false);
-    }
+
     final settingsBox = Hive.box('settings');
     final storedScanRoot = settingsBox.get('scanRoot');
     if (storedScanRoot is String && storedScanRoot.isNotEmpty) {
       _scanRoot = storedScanRoot;
     }
+
+    // Si no hay una cola persistida, intentamos escanear automáticamente una sola vez.
+    // Esto corrige el comportamiento de "solo detecta pistas si seleccionas carpeta".
+    if (stored.isNotEmpty) {
+      await addFiles(stored, persist: false);
+    } else {
+      final rootPath = _scanRoot ?? _defaultScanRoot();
+      if (rootPath != null && rootPath.isNotEmpty) {
+        final found = await scanAndAddRoot(rootOverride: rootPath);
+        // scanAndAddRoot ya se encarga de setear _scanRoot si hace falta.
+        // scanAndAddRoot() llama a addFiles(...), que persiste la playlist y metadatos.
+        // No es necesario usar el valor de found aquí; solo disparamos el escaneo una vez.
+        // (para evitar nuevas ejecuciones, al final habrá playlist persistida)
+        await found;
+
+      }
+    }
+
     await _player.setAudioSource(_playlist);
+    // Inicializa loop por defecto
+    await setLoopMode(LoopMode.off);
     _loadingFromStorage = false;
   }
 
@@ -143,6 +190,42 @@ class AudioHandlerImpl extends ChangeNotifier {
     }
   }
 
+
+  String _localSearchQuery = '';
+
+  String get localSearchQuery => _localSearchQuery;
+
+  void setLocalSearchQuery(String query) {
+    _localSearchQuery = query;
+    notifyListeners();
+  }
+
+
+
+  List<String> get filteredQueue {
+    final q = _localSearchQuery.trim().toLowerCase();
+    if (q.isEmpty) return queue;
+
+    bool containsAny(Map<String, dynamic> meta) {
+      final title = (meta['title'] ?? '').toString().toLowerCase();
+      final artist = (meta['artist'] ?? '').toString().toLowerCase();
+      final album = (meta['album'] ?? '').toString().toLowerCase();
+      return title.contains(q) || artist.contains(q) || album.contains(q);
+    }
+
+    final out = <String>[];
+    for (var i = 0; i < _paths.length; i++) {
+      final meta = i < _metadata.length ? _metadata[i] : <String, dynamic>{};
+      if (containsAny(meta)) out.add(_paths[i]);
+    }
+    return out;
+  }
+
+  String? get currentPath {
+    final idx = _player.currentIndex;
+    if (idx == null || idx < 0 || idx >= _paths.length) return null;
+    return _paths[idx];
+  }
 
   Map<String, dynamic>? metadataForPath(String path) {
     final box = Hive.box('metadata');
