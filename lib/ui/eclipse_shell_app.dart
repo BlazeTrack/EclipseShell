@@ -1,4 +1,19 @@
 ﻿import 'dart:io';
+import 'package:flutter/material.dart';
+
+class SearchBarApp extends StatelessWidget {
+  @override
+  Widget build(BuildContext context) {
+    return MaterialApp(
+      home: Scaffold(
+        appBar: AppBar(title: Text('Search Bar Example')),
+        body: Center(child: TextField()),
+      ),
+    );
+  }
+}
+
+void main() => runApp(SearchBarApp());
 import 'dart:math';
 
 import 'package:file_selector/file_selector.dart';
