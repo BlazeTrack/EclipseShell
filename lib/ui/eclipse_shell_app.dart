@@ -20,386 +20,146 @@ import 'package:file_selector/file_selector.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
+import 'package:audio_service/audio_service.dart';
 import '../audio/audio_handler.dart';
-import 'starfield_painter.dart'; // Importación vital para el fondo animado
 
-class EclipseShellApp extends StatefulWidget {
-  const EclipseShellApp({Key? key}) : super(key: key);
-
-  @override
-  State<EclipseShellApp> createState() => _EclipseShellAppState();
-}
-
-class _EclipseShellAppState extends State<EclipseShellApp> with WidgetsBindingObserver {
-  List<Offset>? _stars;
-  Size? _lastSize;
-  Offset? _eclipseCenter;
-  double? _eclipseRadius;
-
-  @override
-  void initState() {
-    super.initState();
-    WidgetsBinding.instance.addObserver(this);
-    SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
-  }
-
-  @override
-  void dispose() {
-    WidgetsBinding.instance.removeObserver(this);
-    super.dispose();
-  }
-
-  @override
-  void didChangeAppLifecycleState(AppLifecycleState state) {
-    if (state == AppLifecycleState.resumed) {
-      SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
-    }
-  }
-
-  void _initializeStars(Size size) {
-    if (_lastSize == size) return;
-    _lastSize = size;
-    final rng = Random(12345);
-    _stars = List.generate(
-      120,
-      (_) => Offset(rng.nextDouble() * size.width, rng.nextDouble() * size.height),
-    );
-    _eclipseCenter = Offset(size.width * 0.8, size.height * 0.2);
-    _eclipseRadius = size.width * 0.18;
-  }
+class EclipseShellApp extends StatelessWidget {
+  const EclipseShellApp({super.key});
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      backgroundColor: const Color(0xFF02030A),
-      body: LayoutBuilder(
-        builder: (context, constraints) {
-          _initializeStars(constraints.biggest);
-          return Stack(
-            children: [
-              Positioned.fill(
-                child: Container(
-                  decoration: const BoxDecoration(
-                    gradient: LinearGradient(
-                      begin: Alignment.topCenter,
-                      end: Alignment.bottomCenter,
-                      colors: [Color(0xFF02030A), Color(0xFF050818), Color(0xFF11172F)],
-                    ),
-                  ),
-                ),
-              ),
-              Positioned.fill(
-                child: CustomPaint(
-                  painter: StarfieldPainter(
-                    stars: _stars!,
-                    eclipseCenter: _eclipseCenter!,
-                    eclipseRadius: _eclipseRadius!,
-                  ),
-                ),
-              ),
-              SafeArea(
-                child: Padding(
-                  padding: const EdgeInsets.all(8),
-                  child: Column(
-                    children: [
-                      const SizedBox(height: 4),
-                      Center(
-                        child: ConstrainedBox(
-                          constraints: const BoxConstraints(maxWidth: 520),
-                          child: TextField(
-                            readOnly: true,
-                            decoration: InputDecoration(
-                              hintText: 'Buscar...',
-                              hintStyle: TextStyle(color: Colors.white54),
-                              prefixIcon: Icon(Icons.search, color: Colors.white54),
-                              filled: true,
-                              fillColor: Color(0xFF0B1226),
-                              contentPadding: EdgeInsets.symmetric(vertical: 12.0, horizontal: 12.0),
-                              border: OutlineInputBorder(
-                                borderRadius: BorderRadius.circular(8.0),
-                                borderSide: BorderSide(color: Color(0xFF3A4B7C)),
-                              ),
-                              enabledBorder: OutlineInputBorder(
-                                borderRadius: BorderRadius.circular(8.0),
-                                borderSide: BorderSide(color: Color(0xFF3A4B7C)),
-                              ),
-                            ),
-                            style: const TextStyle(color: Colors.white),
-                          ),
-                        ),
-                      ),
-                      const SizedBox(height: 4),
-                      Flexible(
-                        flex: 5,
-                        child: _buildWindow(
-                          title: 'ECLIPSESHELL FILE EXPLORER',
-                          child: _buildFileExplorer(),
-                        ),
-                      ),
-                      const SizedBox(height: 8),
-                      Flexible(
-                        flex: 4,
-                        child: _buildWindow(
-                          title: 'PLAYCONTROL',
-                          child: _buildPlayControl(),
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-            ],
-          );
-        },
-      ),
-    );
-  }
+    final audioHandler = Provider.of<AudioHandlerImpl>(context);
 
-  Widget _buildWindow({required String title, required Widget child}) {
-    return Card(
-      color: Colors.black45,
-      shape: RoundedRectangleBorder(
-        side: const BorderSide(color: Color(0xFF3A4B7C), width: 2),
-        borderRadius: BorderRadius.circular(4),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Container(
-            color: const Color(0xFF1A264F),
-            width: double.infinity,
-            padding: const EdgeInsets.all(6.0),
-            child: Text(
-              title,
-              style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 12),
-            ),
-          ),
-          Expanded(child: child),
+    return Scaffold(
+      backgroundColor: const Color(0xFF121212),
+      appBar: AppBar(
+        title: const Text('Eclipse Shell Player', style: TextStyle(fontFamily: 'monospace')),
+        backgroundColor: const Color(0xFF1E1E1E),
+        elevation: 0,
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.folder_open, color: Colors.cyanAccent),
+            onPressed: () {},
+          )
         ],
       ),
-    );
-  }
-
-  Widget _buildFileExplorer() {
-    final audioHandler = Provider.of<AudioHandlerImpl>(context);
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: [
-        Expanded(
-          child: audioHandler.queue.isEmpty
-              ? Center(
-                  child: Text(
-                    'No hay pistas cargadas. Añade archivos para comenzar a reproducir.',
-                    style: const TextStyle(color: Colors.white70),
-                    textAlign: TextAlign.center,
-                  ),
-                )
-              : ListView.builder(
-                  itemCount: audioHandler.queue.length,
-                  itemBuilder: (context, index) {
-                    final path = audioHandler.queue[index];
-                    final meta = audioHandler.metadataForPath(path) ?? {'title': path.split(Platform.pathSeparator).last};
-                    final title = meta['title'] ?? path.split(Platform.pathSeparator).last;
-                    final isActive = audioHandler.currentTitle == title;
-                    return ListTile(
-                      title: Text(
-                        title,
-                        style: TextStyle(color: isActive ? Colors.cyanAccent : Colors.white70),
+      body: SafeArea(
+        child: Column(
+          children: [
+            Expanded(
+              flex: 4,
+              child: StreamBuilder<MediaItem?>(
+                stream: audioHandler.mediaItem,
+                builder: (context, snapshot) {
+                  final mediaItem = snapshot.data;
+                  return Container(
+                    margin: const EdgeInsets.all(20),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFF1A1A1A),
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(color: Colors.cyanAccent.withOpacity(0.3)),
+                    ),
+                    child: Center(
+                      child: Column(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          const Icon(Icons.music_note, size: 80, color: Colors.cyanAccent),
+                          const SizedBox(height: 15),
+                          Text(
+                            mediaItem?.title ?? 'Ninguna pista en reproducción',
+                            style: const TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold),
+                            textAlign: TextAlign.center,
+                          ),
+                          const SizedBox(height: 8),
+                          Text(
+                            mediaItem?.artist ?? 'Desconocido',
+                            style: const TextStyle(color: Colors.grey, fontSize: 14),
+                          ),
+                        ],
                       ),
-                      subtitle: (meta['artist'] != null && (meta['artist'] as String).isNotEmpty)
-                          ? Text(meta['artist'], style: const TextStyle(color: Colors.white54, fontSize: 12))
-                          : null,
-                      onTap: () => audioHandler.playIndex(index),
-                      leading: Icon(Icons.music_note, color: isActive ? Colors.cyanAccent : Colors.white70),
-                      trailing: isActive ? const Icon(Icons.play_arrow, color: Colors.cyanAccent) : null,
+                    ),
+                  );
+                },
+              ),
+            ),
+            Expanded(
+              flex: 3,
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 24),
+                color: const Color(0xFF1E1E1E),
+                child: Builder(
+                  builder: (context) {
+                    return Column(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        Row(
+                          mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                          children: [
+                            IconButton(
+                              icon: const Icon(Icons.shuffle, color: Colors.grey),
+                              onPressed: () async => await audioHandler.toggleShuffle(),
+                            ),
+                            IconButton(
+                              icon: const Icon(Icons.skip_previous, size: 36, color: Colors.white),
+                              onPressed: () async => await audioHandler.skipToPrevious(),
+                            ),
+                            StreamBuilder<PlaybackState>(
+                              stream: audioHandler.playbackState,
+                              builder: (context, snapshot) {
+                                final playing = snapshot.data?.playing ?? false;
+                                return CircleAvatar(
+                                  radius: 30,
+                                  backgroundColor: Colors.cyanAccent,
+                                  child: IconButton(
+                                    icon: Icon(playing ? Icons.pause : Icons.play_arrow),
+                                    iconSize: 32,
+                                    color: Colors.black,
+                                    onPressed: playing ? audioHandler.pause : audioHandler.play,
+                                  ),
+                                );
+                              },
+                            ),
+                            IconButton(
+                              icon: const Icon(Icons.skip_next, size: 36, color: Colors.white),
+                              onPressed: () async => await audioHandler.skipToNext(),
+                            ),
+                            PopupMenuButton<LoopMode>(
+                              initialValue: audioHandler.loopMode,
+                              onSelected: (LoopMode mode) async {
+                                await audioHandler.setLoopMode(mode);
+                              },
+                              itemBuilder: (BuildContext context) => <PopupMenuEntry<LoopMode>>[
+                                const PopupMenuItem<LoopMode>(
+                                  value: LoopMode.off,
+                                  child: Text('Repetir: Apagado'),
+                                ),
+                                const PopupMenuItem<LoopMode>(
+                                  value: LoopMode.all,
+                                  child: Text('Repetir: Todo'),
+                                ),
+                                const PopupMenuItem<LoopMode>(
+                                  value: LoopMode.once,
+                                  child: Text('Repetir: Una'),
+                                ),
+                              ],
+                              child: Icon(
+                                audioHandler.loopMode == LoopMode.once
+                                    ? Icons.repeat_one
+                                    : Icons.repeat,
+                                color: audioHandler.loopMode != LoopMode.off ? Colors.cyanAccent : Colors.grey,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ],
                     );
                   },
                 ),
+              ),
+            ),
+          ],
         ),
-        const SizedBox(height: 8),
-        ElevatedButton.icon(
-          onPressed: () async {
-            final typeGroup = XTypeGroup(
-              label: 'audio',
-              extensions: ['mp3', 'wav', 'm4a', 'aac', 'flac', 'ogg'],
-            );
-            final files = await openFiles(acceptedTypeGroups: [typeGroup]);
-            if (files.isEmpty) return;
-            final paths = files.map((file) => file.path).whereType<String>().toList();
-            if (paths.isEmpty) return;
-            await audioHandler.addFiles(paths);
-          },
-          icon: const Icon(Icons.folder_open),
-          label: const Text('Agregar pistas'),
-          style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF1A264F)),
-        ),
-      ],
-    );
-  }
-
-  Widget _buildPlayControl() {
-    final audioHandler = Provider.of<AudioHandlerImpl>(context);
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 8.0, vertical: 12.0),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          const Text('Reproduciendo', style: TextStyle(color: Colors.white70, fontWeight: FontWeight.bold)),
-          const SizedBox(height: 8),
-          Row(
-            children: [
-              Container(
-                width: 56,
-                height: 56,
-                margin: const EdgeInsets.only(right: 12),
-                decoration: BoxDecoration(color: Colors.white12, borderRadius: BorderRadius.circular(6)),
-                child: const Icon(Icons.music_note, color: Colors.white70),
-              ),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      audioHandler.currentMetadata['title'] ?? 'Sin pista seleccionada',
-                      style: const TextStyle(color: Colors.white, fontSize: 16),
-                      maxLines: 2,
-                      overflow: TextOverflow.ellipsis,
-                    ),
-                    const SizedBox(height: 4),
-                    Text(
-                      '${audioHandler.currentMetadata['artist'] ?? ''} · ${audioHandler.currentMetadata['album'] ?? ''}',
-                      style: const TextStyle(color: Colors.white70, fontSize: 12),
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                    ),
-                  ],
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 6),
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              IconButton(
-                onPressed: audioHandler.skipToPrevious,
-                icon: const Icon(Icons.skip_previous, color: Colors.white),
-              ),
-              IconButton(
-                onPressed: audioHandler.isPlaying ? audioHandler.pause : audioHandler.play,
-                icon: Icon(
-                  audioHandler.isPlaying ? Icons.pause_circle : Icons.play_circle,
-                  color: Colors.white,
-                  size: 40,
-                ),
-              ),
-              IconButton(
-                onPressed: audioHandler.skipToNext,
-                icon: const Icon(Icons.skip_next, color: Colors.white),
-              ),
-            ],
-          ),
-          const SizedBox(height: 4),
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              IconButton(
-                onPressed: () async => await audioHandler.toggleShuffle(),
-                icon: Icon(audioHandler.isShuffle ? Icons.shuffle_on : Icons.shuffle, color: Colors.white),
-                iconSize: 26,
-                padding: const EdgeInsets.all(6),
-              ),
-              Row(
-                children: [
-                  ElevatedButton.icon(
-                    onPressed: () async {
-                      final selectedRoot = await audioHandler.pickScanRoot();
-                      if (!mounted) return;
-                      if (selectedRoot == null || selectedRoot.isEmpty) {
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          const SnackBar(content: Text('No se seleccionó carpeta')),
-                        );
-                        return;
-                      }
-                      final found = await audioHandler.scanAndAddRoot(rootOverride: selectedRoot);
-                      if (!mounted) return;
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        SnackBar(content: Text('Scan completed: ${found.length} tracks found in $selectedRoot')),
-                      );
-                    },
-                    icon: const Icon(Icons.folder_open, size: 18),
-                    label: const Text('Seleccionar carpeta', style: TextStyle(fontSize: 12)),
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: const Color(0xFF1A264F),
-                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                    ),
-                  ),
-                  const SizedBox(width: 8),
-                  ElevatedButton.icon(
-                    onPressed: () async {
-                      final found = await audioHandler.scanAndAddRoot();
-                      if (!mounted) return;
-                      final root = audioHandler.scanRoot ?? '/storage/emulated/0/EclipseMusic';
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        SnackBar(content: Text('Scan completed: ${found.length} tracks found in $root')),
-                      );
-                    },
-                    icon: const Icon(Icons.search, size: 18),
-                    label: const Text('Escanear carpeta', style: TextStyle(fontSize: 12)),
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: const Color(0xFF1A264F),
-                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                    ),
-                  ),
-                ],
-              ),
-            ],
-          ),
-          const SizedBox(height: 4),
-          Text(
-            audioHandler.scanRoot != null
-                ? 'Carpeta actual: ${audioHandler.scanRoot}'
-                : 'Carpeta por defecto: /storage/emulated/0/EclipseMusic',
-            style: const TextStyle(color: Colors.white54, fontSize: 11),
-          ),
-          const SizedBox(height: 4),
-          StreamBuilder<Duration>(
-            stream: audioHandler.positionStream,
-            builder: (context, snapshotPos) {
-              final pos = snapshotPos.data ?? Duration.zero;
-              final dur = audioHandler.duration;
-              final value = dur.inMilliseconds == 0 ? 0.0 : pos.inMilliseconds / dur.inMilliseconds;
-              return Column(
-                children: [
-                  Slider(
-                    value: value.clamp(0.0, 1.0),
-                    onChanged: (v) {
-                      final target = Duration(milliseconds: (v * dur.inMilliseconds).round());
-                      audioHandler.seekTo(target);
-                    },
-                    activeColor: Colors.cyanAccent,
-                    inactiveColor: Colors.white12,
-                  ),
-                  const SizedBox(height: 3),
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                    children: [
-                      Text(_formatDuration(pos), style: const TextStyle(color: Colors.white70, fontSize: 12)),
-                      Text(_formatDuration(dur), style: const TextStyle(color: Colors.white70, fontSize: 12)),
-                    ],
-                  ),
-                ],
-              );
-            },
-          ),
-        ],
       ),
     );
-  }
-
-  String _formatDuration(Duration duration) {
-    final minutes = duration.inMinutes.remainder(60).toString().padLeft(2, '0');
-    final seconds = duration.inSeconds.remainder(60).toString().padLeft(2, '0');
-    return '$minutes:$seconds';
   }
 }
