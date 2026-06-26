@@ -1,162 +1,102 @@
 import 'package:flutter/material.dart';
 
-class DownloadsPanel extends StatelessWidget {
-  const DownloadsPanel({super.key});
+class DownloadsPanel extends StatefulWidget {
+  const DownloadsPanel({Key? key}) : super(key: key);
 
   @override
-  Widget build(BuildContext context) {
-    return Column(
-      children: [
-        const SizedBox(height: 6),
-        const _SectionTitle('DESCARGAS'),
-        const SizedBox(height: 8),
-        TextField(
-          readOnly: true,
-          decoration: InputDecoration(
-            hintText: 'Buscar en descargas...',
-            hintStyle: const TextStyle(color: Colors.white54),
-            prefixIcon: const Icon(Icons.search, color: Colors.white54),
-            filled: true,
-            fillColor: const Color(0xFF0B1226),
-            contentPadding:
-                const EdgeInsets.symmetric(vertical: 12.0, horizontal: 12.0),
-            border: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(8.0),
-              borderSide: const BorderSide(color: Color(0xFF3A4B7C)),
-            ),
-            enabledBorder: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(8.0),
-              borderSide: const BorderSide(color: Color(0xFF3A4B7C)),
-            ),
-          ),
-          style: const TextStyle(color: Colors.white),
-        ),
-        const SizedBox(height: 12),
-        const _InfoBox(),
-        const SizedBox(height: 12),
-        const _ProgressBox(),
-        const SizedBox(height: 12),
-        const _ThumbsGrid(),
-      ],
-    );
-  }
+  State<DownloadsPanel> createState() => _DownloadsPanelState();
 }
 
-class _SectionTitle extends StatelessWidget {
-  final String title;
-  const _SectionTitle(this.title);
+class _DownloadsPanelState extends State<DownloadsPanel> {
+  final TextEditingController _urlController = TextEditingController();
 
   @override
   Widget build(BuildContext context) {
     return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
-      color: const Color(0xFF1A264F),
-      child: Text(
-        title,
-        style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 12),
-      ),
-    );
-  }
-}
-
-class _InfoBox extends StatelessWidget {
-  const _InfoBox();
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.all(10),
-      decoration: BoxDecoration(
-        color: Colors.black38,
-        border: Border.all(color: const Color(0xFF3A4B7C), width: 1),
-        borderRadius: BorderRadius.circular(6),
-      ),
-      child: const Text(
-        'Sin descargas activas.\n(En esta fase solo UI; el flujo con yt-dlp se implementará después.)',
-        style: TextStyle(color: Colors.white70, fontSize: 12),
-      ),
-    );
-  }
-}
-
-class _ProgressBox extends StatelessWidget {
-  const _ProgressBox();
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.all(10),
-      decoration: BoxDecoration(
-        color: Colors.black38,
-        border: Border.all(color: const Color(0xFF3A4B7C), width: 1),
-        borderRadius: BorderRadius.circular(6),
-      ),
+      color: Colors.grey.shade950,
+      padding: const EdgeInsets.all(12.0),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Text('Progreso',
-              style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 12)),
+          // Barra de Título del Panel de Descargas
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+            color: Colors.dark_purple.shade900, // Variación estética retro
+            width: double.infinity,
+            child: const Text(
+              "DESCARGAS (UI TEMPORAL)",
+              style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontFamily: 'monospace', fontSize: 12),
+            ),
+          ),
+          const SizedBox(height: 15),
+          const Text(
+            "Extractor Lossless",
+            style: TextStyle(color: Colors.white, fontSize: 14, fontWeight: FontWeight.bold, fontFamily: 'monospace'),
+          ),
+          const SizedBox(height: 6),
+          TextField(
+            controller: _urlController,
+            style: const TextStyle(color: Colors.white, fontFamily: 'monospace', fontSize: 12),
+            decoration: InputDecoration(
+              hintText: "Pega el enlace de YouTube aquí...",
+              hintStyle: const TextStyle(color: Colors.grey, fontSize: 11),
+              filled: true,
+              fillColor: Colors.black,
+              enabledBorder: OutlineInputBorder(borderSide: BorderSide(color: Colors.grey.shade800)),
+              focusedBorder: const OutlineInputBorder(borderSide: BorderSide(color: Colors.purple)),
+            ),
+          ),
           const SizedBox(height: 10),
-          const LinearProgressIndicator(value: 0),
-          const SizedBox(height: 8),
-          const Text('0% · 00:00 / 00:00', style: TextStyle(color: Colors.white54, fontSize: 12)),
+          SizedBox(
+            width: double.infinity,
+            child: ElevatedButton.icon(
+              style: ElevatedButton.styleFrom(backgroundColor: Colors.purple.shade900),
+              onPressed: () {
+                // Notificación visual de UI sin lógica por el momento
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(
+                    content: Text('Flujo de yt-dlp / yt-dl deshabilitado temporalmente en este parche.'),
+                    backgroundColor: Colors.purple,
+                  ),
+                );
+              },
+              icon: const Icon(Icons.cloud_download, size: 16, color: Colors.white),
+              label: const Text(
+                "Descargar FLAC",
+                style: TextStyle(color: Colors.white, fontFamily: 'monospace', fontSize: 12),
+              ),
+            ),
+          ),
+          const SizedBox(height: 20),
+          // Simulación de sección de progreso vacía
+          Divider(color: Colors.grey.shade800),
+          const SizedBox(height: 5),
+          const Text(
+            "PROGRESO ACTUAL:",
+            style: TextStyle(color: Colors.grey, fontSize: 11, fontFamily: 'monospace'),
+          ),
+          const Expanded(
+            child: Center(
+              key: Key("empty_state_downloads"),
+              child: Text(
+                "[Sin descargas activas]",
+                style: TextStyle(color: Colors.grey, fontSize: 11, fontFamily: 'monospace', style: FontStyle.italic),
+              ),
+            ),
+          )
         ],
       ),
     );
   }
-}
-
-class _ThumbsGrid extends StatelessWidget {
-  const _ThumbsGrid();
 
   @override
-  Widget build(BuildContext context) {
-    return Expanded(
-      child: GridView.builder(
-        itemCount: 6,
-        gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-          crossAxisCount: 2,
-          mainAxisSpacing: 10,
-          crossAxisSpacing: 10,
-          childAspectRatio: 0.9,
-        ),
-        itemBuilder: (context, index) {
-          return Container(
-            decoration: BoxDecoration(
-              color: Colors.black38,
-              border: Border.all(color: const Color(0xFF3A4B7C), width: 1),
-              borderRadius: BorderRadius.circular(6),
-            ),
-            child: Column(
-              children: [
-                Expanded(
-                  child: Container(
-                    width: double.infinity,
-                    decoration: const BoxDecoration(
-                      color: Color(0xFF0B1226),
-                      borderRadius: BorderRadius.vertical(top: Radius.circular(6)),
-                    ),
-                    child: const Icon(Icons.music_note, color: Colors.white54),
-                  ),
-                ),
-                Padding(
-                  padding: const EdgeInsets.all(6.0),
-                  child: Text(
-                    'Item ${index + 1}',
-                    style: const TextStyle(color: Colors.white60, fontSize: 11),
-                    overflow: TextOverflow.ellipsis,
-                    maxLines: 1,
-                  ),
-                ),
-              ],
-            ),
-          );
-        },
-      ),
-    );
+  void dispose() {
+    _urlController.dispose();
+    super.dispose();
   }
 }
 
+// Extensión rápida de color por si acaso tu app usa una paleta oscura customizada
+extension on Colors {
+  static MaterialColor get dark_purple => Colors.purple;
+}

@@ -1,0 +1,540 @@
+
+--- ARCHIVO: F:\Github\EclipseShell\lib\main.dart.FullName ---
+
+import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+import 'package:provider/provider.dart';
+import 'package:hive_flutter/hive_flutter.dart';
+import 'audio/audio_handler.dart';
+import 'ui/eclipse_shell_app.dart';
+
+void main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+  await SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
+  await Hive.initFlutter();
+  await Hive.openBox<List>('playlist');
+  await Hive.openBox('metadata');
+  await Hive.openBox('settings');
+  runApp(
+    MultiProvider(
+      providers: [
+       Provider<AudioHandlerImpl>(create: (_) => AudioHandlerImpl()),
+      ],
+      child: const MaterialApp(
+        title: 'EclipseShell',
+        debugShowCheckedModeBanner: false,
+        home: EclipseShellApp(),
+      ),
+    ),
+  );
+}
+
+--- ARCHIVO: F:\Github\EclipseShell\lib\audio\audio_handler.dart.FullName ---
+
+import 'package:just_audio/just_audio.dart' as ja;
+import 'package:audio_service/audio_service.dart';
+
+enum LoopMode { off, once, all }
+
+class AudioHandlerImpl extends BaseAudioHandler with QueueHandler, SeekHandler {
+  final ja.AudioPlayer _player = ja.AudioPlayer();
+  final ja.ConcatenatingAudioSource _playlist = ja.ConcatenatingAudioSource(children: []);
+  
+  LoopMode _loopMode = LoopMode.off;
+  LoopMode get loopMode => _loopMode;
+
+  AudioHandlerImpl() {
+    _init();
+  }
+
+  void _init() {
+    _player.playbackEventStream.map(_transformEvent).pipe(playbackState);
+    
+    _player.currentIndexStream.listen((index) {
+      if (index != null && queue.value.isNotEmpty) {
+        mediaItem.add(queue.value[index]);
+      }
+    });
+  }
+
+  Future<void> setLoopMode(LoopMode mode) async {
+    _loopMode = mode;
+    switch (mode) {
+      case LoopMode.off:
+        await _player.setLoopMode(ja.LoopMode.off);
+        break;
+      case LoopMode.once:
+        await _player.setLoopMode(ja.LoopMode.one);
+        break;
+      case LoopMode.all:
+        await _player.setLoopMode(ja.LoopMode.all);
+        break;
+    }
+    playbackState.add(playbackState.value.copyWith());
+  }
+
+  Future<void> toggleShuffle() async {
+    final bool shuffleOn = !_player.shuffleModeEnabled;
+    await _player.setShuffleModeEnabled(shuffleOn);
+    playbackState.add(playbackState.value.copyWith(
+      shuffleMode: shuffleOn ? AudioServiceShuffleMode.all : AudioServiceShuffleMode.none,
+    ));
+  }
+
+  Future<void> loadPlaylist(List<MediaItem> items) async {
+    queue.add(items);
+    final sources = items.map((item) => ja.AudioSource.uri(Uri.parse(item.id), tag: item)).toList();
+    await _playlist.clear();
+    await _playlist.addAll(sources);
+    await _player.setAudioSource(_playlist);
+  }
+
+  String? _defaultScanRoot() {
+    return '/storage/emulated/0/Music';
+  }
+
+  @override
+  Future<void> play() => _player.play();
+
+  @override
+  Future<void> pause() => _player.pause();
+
+  @override
+  Future<void> stop() => _player.stop();
+
+  @override
+  Future<void> skipToNext() => _player.seekToNext();
+
+  @override
+  Future<void> skipToPrevious() => _player.seekToPrevious();
+
+  @override
+  Future<void> seek(Duration position) => _player.seek(position);
+
+  PlaybackState _transformEvent(ja.PlaybackEvent event) {
+    return PlaybackState(
+      controls: [
+        MediaControl.skipToPrevious,
+        if (_player.playing) MediaControl.pause else MediaControl.play,
+        MediaControl.stop,
+        MediaControl.skipToNext,
+      ],
+      systemActions: const {
+        MediaAction.seek,
+        MediaAction.seekForward,
+        MediaAction.seekBackward,
+      },
+      androidCompactActionIndices: const [0, 1, 3],
+      processingState: const {
+        ja.ProcessingState.idle: AudioProcessingState.idle,
+        ja.ProcessingState.loading: AudioProcessingState.loading,
+        ja.ProcessingState.buffering: AudioProcessingState.buffering,
+        ja.ProcessingState.ready: AudioProcessingState.ready,
+        ja.ProcessingState.completed: AudioProcessingState.completed,
+      }[_player.processingState]!,
+      playing: _player.playing,
+      updatePosition: event.updatePosition,
+      bufferedPosition: event.bufferedPosition,
+      speed: _player.speed,
+      queueIndex: event.currentIndex,
+    );
+  }
+}
+
+--- ARCHIVO: F:\Github\EclipseShell\lib\ui\downloads_panel.dart.FullName ---
+
+import 'package:flutter/material.dart';
+
+class DownloadsPanel extends StatelessWidget {
+  const DownloadsPanel({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      children: [
+        const SizedBox(height: 6),
+        const _SectionTitle('DESCARGAS'),
+        const SizedBox(height: 8),
+        TextField(
+          readOnly: true,
+          decoration: InputDecoration(
+            hintText: 'Buscar en descargas...',
+            hintStyle: const TextStyle(color: Colors.white54),
+            prefixIcon: const Icon(Icons.search, color: Colors.white54),
+            filled: true,
+            fillColor: const Color(0xFF0B1226),
+            contentPadding:
+                const EdgeInsets.symmetric(vertical: 12.0, horizontal: 12.0),
+            border: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(8.0),
+              borderSide: const BorderSide(color: Color(0xFF3A4B7C)),
+            ),
+            enabledBorder: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(8.0),
+              borderSide: const BorderSide(color: Color(0xFF3A4B7C)),
+            ),
+          ),
+          style: const TextStyle(color: Colors.white),
+        ),
+        const SizedBox(height: 12),
+        const _InfoBox(),
+        const SizedBox(height: 12),
+        const _ProgressBox(),
+        const SizedBox(height: 12),
+        const _ThumbsGrid(),
+      ],
+    );
+  }
+}
+
+class _SectionTitle extends StatelessWidget {
+  final String title;
+  const _SectionTitle(this.title);
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+      color: const Color(0xFF1A264F),
+      child: Text(
+        title,
+        style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 12),
+      ),
+    );
+  }
+}
+
+class _InfoBox extends StatelessWidget {
+  const _InfoBox();
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(10),
+      decoration: BoxDecoration(
+        color: Colors.black38,
+        border: Border.all(color: const Color(0xFF3A4B7C), width: 1),
+        borderRadius: BorderRadius.circular(6),
+      ),
+      child: const Text(
+        'Sin descargas activas.\n(En esta fase solo UI; el flujo con yt-dlp se implementará después.)',
+        style: TextStyle(color: Colors.white70, fontSize: 12),
+      ),
+    );
+  }
+}
+
+class _ProgressBox extends StatelessWidget {
+  const _ProgressBox();
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(10),
+      decoration: BoxDecoration(
+        color: Colors.black38,
+        border: Border.all(color: const Color(0xFF3A4B7C), width: 1),
+        borderRadius: BorderRadius.circular(6),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Text('Progreso',
+              style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 12)),
+          const SizedBox(height: 10),
+          const LinearProgressIndicator(value: 0),
+          const SizedBox(height: 8),
+          const Text('0% · 00:00 / 00:00', style: TextStyle(color: Colors.white54, fontSize: 12)),
+        ],
+      ),
+    );
+  }
+}
+
+class _ThumbsGrid extends StatelessWidget {
+  const _ThumbsGrid();
+
+  @override
+  Widget build(BuildContext context) {
+    return Expanded(
+      child: GridView.builder(
+        itemCount: 6,
+        gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+          crossAxisCount: 2,
+          mainAxisSpacing: 10,
+          crossAxisSpacing: 10,
+          childAspectRatio: 0.9,
+        ),
+        itemBuilder: (context, index) {
+          return Container(
+            decoration: BoxDecoration(
+              color: Colors.black38,
+              border: Border.all(color: const Color(0xFF3A4B7C), width: 1),
+              borderRadius: BorderRadius.circular(6),
+            ),
+            child: Column(
+              children: [
+                Expanded(
+                  child: Container(
+                    width: double.infinity,
+                    decoration: const BoxDecoration(
+                      color: Color(0xFF0B1226),
+                      borderRadius: BorderRadius.vertical(top: Radius.circular(6)),
+                    ),
+                    child: const Icon(Icons.music_note, color: Colors.white54),
+                  ),
+                ),
+                Padding(
+                  padding: const EdgeInsets.all(6.0),
+                  child: Text(
+                    'Item ${index + 1}',
+                    style: const TextStyle(color: Colors.white60, fontSize: 11),
+                    overflow: TextOverflow.ellipsis,
+                    maxLines: 1,
+                  ),
+                ),
+              ],
+            ),
+          );
+        },
+      ),
+    );
+  }
+}
+
+
+--- ARCHIVO: F:\Github\EclipseShell\lib\ui\eclipse_shell_app.dart.FullName ---
+
+import 'dart:io';
+import 'package:flutter/material.dart';
+
+class SearchBarApp extends StatelessWidget {
+  @override
+  Widget build(BuildContext context) {
+    return MaterialApp(
+      home: Scaffold(
+        appBar: AppBar(title: Text('Search Bar Example')),
+        body: Center(child: TextField()),
+      ),
+    );
+  }
+}
+
+void main() => runApp(SearchBarApp());
+import 'dart:math';
+
+import 'package:file_selector/file_selector.dart';
+import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+import 'package:provider/provider.dart';
+import 'package:audio_service/audio_service.dart';
+import '../audio/audio_handler.dart';
+
+class EclipseShellApp extends StatelessWidget {
+  const EclipseShellApp({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    final audioHandler = Provider.of<AudioHandlerImpl>(context);
+
+    return Scaffold(
+      backgroundColor: const Color(0xFF121212),
+      appBar: AppBar(
+        title: const Text('Eclipse Shell Player', style: TextStyle(fontFamily: 'monospace')),
+        backgroundColor: const Color(0xFF1E1E1E),
+        elevation: 0,
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.folder_open, color: Colors.cyanAccent),
+            onPressed: () {},
+          )
+        ],
+      ),
+      body: SafeArea(
+        child: Column(
+          children: [
+            Expanded(
+              flex: 4,
+              child: StreamBuilder<MediaItem?>(
+                stream: audioHandler.mediaItem,
+                builder: (context, snapshot) {
+                  final mediaItem = snapshot.data;
+                  return Container(
+                    margin: const EdgeInsets.all(20),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFF1A1A1A),
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(color: Colors.cyanAccent.withOpacity(0.3)),
+                    ),
+                    child: Center(
+                      child: Column(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          const Icon(Icons.music_note, size: 80, color: Colors.cyanAccent),
+                          const SizedBox(height: 15),
+                          Text(
+                            mediaItem?.title ?? 'Ninguna pista en reproducción',
+                            style: const TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold),
+                            textAlign: TextAlign.center,
+                          ),
+                          const SizedBox(height: 8),
+                          Text(
+                            mediaItem?.artist ?? 'Desconocido',
+                            style: const TextStyle(color: Colors.grey, fontSize: 14),
+                          ),
+                        ],
+                      ),
+                    ),
+                  );
+                },
+              ),
+            ),
+            Expanded(
+              flex: 3,
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 24),
+                color: const Color(0xFF1E1E1E),
+                child: Builder(
+                  builder: (context) {
+                    return Column(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        Row(
+                          mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                          children: [
+                            IconButton(
+                              icon: const Icon(Icons.shuffle, color: Colors.grey),
+                              onPressed: () async => await audioHandler.toggleShuffle(),
+                            ),
+                            IconButton(
+                              icon: const Icon(Icons.skip_previous, size: 36, color: Colors.white),
+                              onPressed: () async => await audioHandler.skipToPrevious(),
+                            ),
+                            StreamBuilder<PlaybackState>(
+                              stream: audioHandler.playbackState,
+                              builder: (context, snapshot) {
+                                final playing = snapshot.data?.playing ?? false;
+                                return CircleAvatar(
+                                  radius: 30,
+                                  backgroundColor: Colors.cyanAccent,
+                                  child: IconButton(
+                                    icon: Icon(playing ? Icons.pause : Icons.play_arrow),
+                                    iconSize: 32,
+                                    color: Colors.black,
+                                    onPressed: playing ? audioHandler.pause : audioHandler.play,
+                                  ),
+                                );
+                              },
+                            ),
+                            IconButton(
+                              icon: const Icon(Icons.skip_next, size: 36, color: Colors.white),
+                              onPressed: () async => await audioHandler.skipToNext(),
+                            ),
+                            PopupMenuButton<LoopMode>(
+                              initialValue: audioHandler.loopMode,
+                              onSelected: (LoopMode mode) async {
+                                await audioHandler.setLoopMode(mode);
+                              },
+                              itemBuilder: (BuildContext context) => <PopupMenuEntry<LoopMode>>[
+                                const PopupMenuItem<LoopMode>(
+                                  value: LoopMode.off,
+                                  child: Text('Repetir: Apagado'),
+                                ),
+                                const PopupMenuItem<LoopMode>(
+                                  value: LoopMode.all,
+                                  child: Text('Repetir: Todo'),
+                                ),
+                                const PopupMenuItem<LoopMode>(
+                                  value: LoopMode.once,
+                                  child: Text('Repetir: Una'),
+                                ),
+                              ],
+                              child: Icon(
+                                audioHandler.loopMode == LoopMode.once
+                                    ? Icons.repeat_one
+                                    : Icons.repeat,
+                                color: audioHandler.loopMode != LoopMode.off ? Colors.cyanAccent : Colors.grey,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ],
+                    );
+                  },
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+--- ARCHIVO: F:\Github\EclipseShell\lib\ui\starfield_painter.dart.FullName ---
+
+import 'package:flutter/material.dart';
+
+class StarfieldPainter extends CustomPainter {
+  final List<Offset> stars;
+  final Offset eclipseCenter;
+  final double eclipseRadius;
+
+  const StarfieldPainter({
+    required this.stars,
+    required this.eclipseCenter,
+    required this.eclipseRadius,
+  });
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final paint = Paint()..color = Colors.white.withOpacity(0.3);
+    for (final star in stars) {
+      final radius = 0.4 + (star.dx + star.dy) % 1.6;
+      canvas.drawCircle(star, radius, paint);
+    }
+
+    final eclipsePaint = Paint()
+      ..shader = RadialGradient(
+        colors: [Colors.white24, Colors.transparent],
+        stops: const [0.0, 1.0],
+      ).createShader(Rect.fromCircle(center: eclipseCenter, radius: eclipseRadius));
+
+    canvas.drawCircle(eclipseCenter, eclipseRadius, eclipsePaint);
+  }
+
+  @override
+  bool shouldRepaint(covariant StarfieldPainter oldDelegate) {
+    return oldDelegate.stars != stars ||
+        oldDelegate.eclipseCenter != eclipseCenter ||
+        oldDelegate.eclipseRadius != eclipseRadius;
+  }
+}
+
+--- ARCHIVO: F:\Github\EclipseShell\lib\utils\scanner.dart.FullName ---
+
+import 'dart:io';
+
+// Top-level function for compute/isolate usage.
+List<String> scanDirectoryPaths(String rootPath) {
+  final results = <String>[];
+  try {
+    final root = Directory(rootPath);
+    if (!root.existsSync()) return results;
+    final walker = root.listSync(recursive: true);
+    for (final entry in walker) {
+      if (entry is File) {
+        final path = entry.path.toLowerCase();
+        if (path.endsWith('.mp3') || path.endsWith('.wav') || path.endsWith('.m4a') || path.endsWith('.aac') || path.endsWith('.flac') || path.endsWith('.ogg')) {
+          results.add(entry.path);
+        }
+      }
+    }
+  } catch (_) {
+    // ignore errors, return what we found
+  }
+  return results;
+}
