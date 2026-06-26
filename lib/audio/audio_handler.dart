@@ -1,65 +1,78 @@
-﻿import 'package:just_audio/just_audio.dart' as ja;
-import 'package:audio_service/audio_service.dart';
+﻿import 'package:audio_service/audio_service.dart';
+import 'package:just_audio/just_audio.dart' as ja;
+import 'package:flutter/foundation.dart';
 
-enum LoopMode { off, once, all }
+enum LoopModeState { off, once, all }
 
-class AudioHandlerImpl extends BaseAudioHandler with QueueHandler, SeekHandler {
+// Interfaz personalizada para asegurar que la UI y Provider vean los métodos del clon
+abstract class AudioHandlerCustom extends BaseAudioHandler implements QueueHandler, PlaybackHandler {
+  List<MediaItem> get filteredQueue;
+  String get localSearchQuery;
+  void setLocalSearchQuery(String query);
+  void setLoopModeCustom(LoopModeState mode);
+}
+
+class AudioHandlerImpl extends BaseAudioHandler implements AudioHandlerCustom {
   final ja.AudioPlayer _player = ja.AudioPlayer();
-  final ja.ConcatenatingAudioSource _playlist = ja.ConcatenatingAudioSource(children: []);
-  
-  LoopMode _loopMode = LoopMode.off;
-  LoopMode get loopMode => _loopMode;
+  final List<MediaItem> _fullQueue = [];
+  String _localSearchQuery = "";
+  LoopModeState _currentLoopMode = LoopModeState.off;
 
   AudioHandlerImpl() {
     _init();
   }
 
   void _init() {
-    _player.playbackEventStream.map(_transformEvent).pipe(playbackState);
-    
-    _player.currentIndexStream.listen((index) {
-      if (index != null && queue.value.isNotEmpty) {
-        mediaItem.add(queue.value[index]);
+    // Escucha el cambio de estado para procesar el término de pista manualmente si es necesario
+    _player.processingStateStream.listen((state) {
+      if (state == ja.ProcessingState.completed) {
+        if (_currentLoopMode == LoopModeState.once) {
+          _player.seek(Duration.zero);
+          _player.play();
+        } else if (_currentLoopMode == LoopModeState.all) {
+          _player.seek(Duration.zero);
+          _player.play();
+        }
       }
     });
+
+    // Mapear el flujo de reproducción nativo al estado de audio_service
+    _player.playbackEventStream.map(_transformEvent).pipe(playbackState);
   }
 
-  Future<void> setLoopMode(LoopMode mode) async {
-    _loopMode = mode;
-    switch (mode) {
-      case LoopMode.off:
-        await _player.setLoopMode(ja.LoopMode.off);
-        break;
-      case LoopMode.once:
-        await _player.setLoopMode(ja.LoopMode.one);
-        break;
-      case LoopMode.all:
-        await _player.setLoopMode(ja.LoopMode.all);
-        break;
+  @override
+  List<MediaItem> get filteredQueue {
+    if (_localSearchQuery.isEmpty) return _fullQueue;
+    return _fullQueue.where((item) {
+      final query = _localSearchQuery.toLowerCase();
+      final titleMatch = item.title.toLowerCase().contains(query);
+      final artistMatch = (item.artist ?? '').toLowerCase().contains(query);
+      final albumMatch = (item.album ?? '').toLowerCase().contains(query);
+      return titleMatch || artistMatch || albumMatch;
+    }).toList();
+  }
+
+  @override
+  String get localSearchQuery => _localSearchQuery;
+
+  @override
+  void setLocalSearchQuery(String query) {
+    _localSearchQuery = query;
+    notifyListeners(); // Notifica a Provider para reconstruir la UI de la lista en tiempo real
+  }
+
+  @override
+  void setLoopModeCustom(LoopModeState mode) {
+    _currentLoopMode = mode;
+    if (mode == LoopModeState.all) {
+      _player.setLoopMode(ja.LoopMode.all);
+    } else {
+      _player.setLoopMode(ja.LoopMode.off);
     }
-    playbackState.add(playbackState.value.copyWith());
+    notifyListeners();
   }
 
-  Future<void> toggleShuffle() async {
-    final bool shuffleOn = !_player.shuffleModeEnabled;
-    await _player.setShuffleModeEnabled(shuffleOn);
-    playbackState.add(playbackState.value.copyWith(
-      shuffleMode: shuffleOn ? AudioServiceShuffleMode.all : AudioServiceShuffleMode.none,
-    ));
-  }
-
-  Future<void> loadPlaylist(List<MediaItem> items) async {
-    queue.add(items);
-    final sources = items.map((item) => ja.AudioSource.uri(Uri.parse(item.id), tag: item)).toList();
-    await _playlist.clear();
-    await _playlist.addAll(sources);
-    await _player.setAudioSource(_playlist);
-  }
-
-  String? _defaultScanRoot() {
-    return '/storage/emulated/0/Music';
-  }
-
+  // Métodos obligatorios de control de reproducción
   @override
   Future<void> play() => _player.play();
 
@@ -67,16 +80,10 @@ class AudioHandlerImpl extends BaseAudioHandler with QueueHandler, SeekHandler {
   Future<void> pause() => _player.pause();
 
   @override
-  Future<void> stop() => _player.stop();
-
-  @override
-  Future<void> skipToNext() => _player.seekToNext();
-
-  @override
-  Future<void> skipToPrevious() => _player.seekToPrevious();
-
-  @override
   Future<void> seek(Duration position) => _player.seek(position);
+
+  @override
+  Future<void> stop() => _player.stop();
 
   PlaybackState _transformEvent(ja.PlaybackEvent event) {
     return PlaybackState(
@@ -91,7 +98,7 @@ class AudioHandlerImpl extends BaseAudioHandler with QueueHandler, SeekHandler {
         MediaAction.seekForward,
         MediaAction.seekBackward,
       },
-      androidCompactActionIndices: const [0, 1, 3],
+      androidCompactCapabilities: const [0, 1, 3],
       processingState: const {
         ja.ProcessingState.idle: AudioProcessingState.idle,
         ja.ProcessingState.loading: AudioProcessingState.loading,
@@ -100,8 +107,8 @@ class AudioHandlerImpl extends BaseAudioHandler with QueueHandler, SeekHandler {
         ja.ProcessingState.completed: AudioProcessingState.completed,
       }[_player.processingState]!,
       playing: _player.playing,
-      updatePosition: event.updatePosition,
-      bufferedPosition: event.bufferedPosition,
+      updatePosition: _player.position,
+      bufferedPosition: _player.bufferedPosition,
       speed: _player.speed,
       queueIndex: event.currentIndex,
     );

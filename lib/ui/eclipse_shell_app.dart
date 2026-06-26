@@ -1,141 +1,128 @@
 ﻿import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
-import 'package:audio_service/audio_service.dart';
 import '../audio/audio_handler.dart';
+import 'downloads_panel.dart';
 
 class EclipseShellApp extends StatelessWidget {
-  const EclipseShellApp({super.key});
+  const EclipseShellApp({Key? key}) : super(key: key);
 
   @override
   Widget build(BuildContext context) {
-    final audioHandler = Provider.of<AudioHandlerImpl>(context);
+    final audioHandler = context.watch<AudioHandlerCustom>();
 
     return Scaffold(
-      backgroundColor: const Color(0xFF121212),
-      appBar: AppBar(
-        title: const Text('Eclipse Shell Player', style: TextStyle(fontFamily: 'monospace')),
-        backgroundColor: const Color(0xFF1E1E1E),
-        elevation: 0,
-        actions: [
-          IconButton(
-            icon: const Icon(Icons.folder_open, color: Colors.cyanAccent),
-            onPressed: () {},
-          )
-        ],
-      ),
+      backgroundColor: Colors.black,
       body: SafeArea(
-        child: Column(
+        child: Row(
           children: [
+            // Panel Izquierdo: Reproductor Local y Búsqueda
             Expanded(
-              flex: 4,
-              child: StreamBuilder<MediaItem?>(
-                stream: audioHandler.mediaItem,
-                builder: (context, snapshot) {
-                  final mediaItem = snapshot.data;
-                  return Container(
-                    margin: const EdgeInsets.all(20),
-                    decoration: BoxDecoration(
-                      color: const Color(0xFF1A1A1A),
-                      borderRadius: BorderRadius.circular(12),
-                      border: Border.all(color: Colors.cyanAccent.withOpacity(0.3)),
-                    ),
-                    child: Center(
-                      child: Column(
-                        mainAxisAlignment: MainAxisAlignment.center,
-                        children: [
-                          const Icon(Icons.music_note, size: 80, color: Colors.cyanAccent),
-                          const SizedBox(height: 15),
-                          Text(
-                            mediaItem?.title ?? 'Ninguna pista en reproducción',
-                            style: const TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold),
-                            textAlign: TextAlign.center,
-                          ),
-                          const SizedBox(height: 8),
-                          Text(
-                            mediaItem?.artist ?? 'Desconocido',
-                            style: const TextStyle(color: Colors.grey, fontSize: 14),
-                          ),
-                        ],
+              flex: 2,
+              child: Container(
+                decoration: BoxDecoration(
+                  border: Border(right: BorderSide(color: Colors.grey.shade900, width: 2)),
+                ),
+                padding: const EdgeInsets.all(12.0),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    // Cabecera Estilo Ventana Retro
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                      color: Colors.indigo.shade900,
+                      width: double.infinity,
+                      child: const Text(
+                        "ECLIPSESHELL - LOCAL PLAYER",
+                        style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontFamily: 'monospace'),
                       ),
                     ),
-                  );
-                },
-              ),
-            ),
-            Expanded(
-              flex: 3,
-              child: Container(
-                padding: const EdgeInsets.symmetric(horizontal: 24),
-                color: const Color(0xFF1E1E1E),
-                child: Builder(
-                  builder: (context) {
-                    return Column(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        Row(
-                          mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-                          children: [
-                            IconButton(
-                              icon: const Icon(Icons.shuffle, color: Colors.grey),
-                              onPressed: () async => await audioHandler.toggleShuffle(),
-                            ),
-                            IconButton(
-                              icon: const Icon(Icons.skip_previous, size: 36, color: Colors.white),
-                              onPressed: () async => await audioHandler.skipToPrevious(),
-                            ),
-                            StreamBuilder<PlaybackState>(
-                              stream: audioHandler.playbackState,
-                              builder: (context, snapshot) {
-                                final playing = snapshot.data?.playing ?? false;
-                                return CircleAvatar(
-                                  radius: 30,
-                                  backgroundColor: Colors.cyanAccent,
-                                  child: IconButton(
-                                    icon: Icon(playing ? Icons.pause : Icons.play_arrow),
-                                    iconSize: 32,
-                                    color: Colors.black,
-                                    onPressed: playing ? audioHandler.pause : audioHandler.play,
-                                  ),
+                    const SizedBox(height: 10),
+                    // Barra de Búsqueda Conectada
+                    TextField(
+                      onChanged: (value) {
+                        audioHandler.setLocalSearchQuery(value);
+                      },
+                      style: const TextStyle(color: Colors.white, fontFamily: 'monospace'),
+                      decoration: InputDecoration(
+                        hintText: "Buscar track, artista o álbum...",
+                        hintStyle: const TextStyle(color: Colors.grey),
+                        prefixIcon: const Icon(Icons.search, color: Colors.grey),
+                        filled: true,
+                        fillColor: Colors.grey.shade950,
+                        enabledBorder: OutlineInputBorder(borderSide: BorderSide(color: Colors.grey.shade800)),
+                        focusedBorder: const OutlineInputBorder(borderSide: BorderSide(color: Colors.indigo)),
+                      ),
+                    ),
+                    const SizedBox(height: 10),
+                    // Lista de Canciones Filtrada en Tiempo Real
+                    Expanded(
+                      child: audioHandler.filteredQueue.isEmpty
+                          ? const Center(
+                              child: Text(
+                                "[No se encontraron pistas]",
+                                style: TextStyle(color: Colors.grey, fontFamily: 'monospace'),
+                              ),
+                            )
+                          : ListView.builder(
+                              itemCount: audioHandler.filteredQueue.length,
+                              itemBuilder: (context, index) {
+                                final item = audioHandler.filteredQueue[index];
+                                return ListTile(
+                                  dense: true,
+                                  title: Text(item.title, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+                                  subtitle: Text(item.artist ?? "Artista Desconocido", style: TextStyle(color: Colors.grey.shade400)),
+                                  leading: const Icon(Icons.music_note, color: Colors.indigo_accent),
+                                  onTap: () {
+                                    audioHandler.playMediaItem(item);
+                                  },
                                 );
                               },
                             ),
-                            IconButton(
-                              icon: const Icon(Icons.skip_next, size: 36, color: Colors.white),
-                              onPressed: () async => await audioHandler.skipToNext(),
-                            ),
-                            PopupMenuButton<LoopMode>(
-                              initialValue: audioHandler.loopMode,
-                              onSelected: (LoopMode mode) async {
-                                await audioHandler.setLoopMode(mode);
-                              },
-                              itemBuilder: (BuildContext context) => <PopupMenuEntry<LoopMode>>[
-                                const PopupMenuItem<LoopMode>(
-                                  value: LoopMode.off,
-                                  child: Text('Repetir: Apagado'),
-                                ),
-                                const PopupMenuItem<LoopMode>(
-                                  value: LoopMode.all,
-                                  child: Text('Repetir: Todo'),
-                                ),
-                                const PopupMenuItem<LoopMode>(
-                                  value: LoopMode.once,
-                                  child: Text('Repetir: Una'),
-                                ),
-                              ],
-                              child: Icon(
-                                audioHandler.loopMode == LoopMode.once
-                                    ? Icons.repeat_one
-                                    : Icons.repeat,
-                                color: audioHandler.loopMode != LoopMode.off ? Colors.cyanAccent : Colors.grey,
+                    ),
+                    // Panel de Controles Inferior (PLAYCONTROL)
+                    Container(
+                      color: Colors.grey.shade950,
+                      padding: const EdgeInsets.all(8.0),
+                      child: Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        children: [
+                          IconButton(
+                            icon: const Icon(Icons.play_arrow, color: Colors.white),
+                            onPressed: () => audioHandler.play(),
+                          ),
+                          IconButton(
+                            icon: const Icon(Icons.pause, color: Colors.white),
+                            onPressed: () => audioHandler.pause(),
+                          ),
+                          // Selector de Loop Corregido
+                          PopupMenuButton<LoopModeState>(
+                            icon: const Icon(Icons.repeat, color: Colors.white),
+                            tooltip: "Modo de Repetición",
+                            onSelected: (LoopModeState mode) {
+                              audioHandler.setLoopModeCustom(mode);
+                            },
+                            itemBuilder: (BuildContext context) => <PopupMenuEntry<LoopModeState>>[
+                              const PopupMenuItem<LoopModeState>(
+                                value: LoopModeState.off,
+                                child: Text('Una vez (Off)'),
                               ),
-                            ),
-                          ],
-                        ),
-                      ],
-                    );
-                  },
+                              const PopupMenuItem<LoopModeState>(
+                                value: LoopModeState.all,
+                                child: Text('Loop todo'),
+                              ),
+                            ],
+                          ),
+                        ],
+                      ),
+                    )
+                  ],
                 ),
               ),
+            ),
+            // Panel Derecho: Pestaña Estática de Descargas UI
+            const Expanded(
+              flex: 1,
+              child: DownloadsPanel(),
             ),
           ],
         ),
