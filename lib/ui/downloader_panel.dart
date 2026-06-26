@@ -100,8 +100,16 @@ class _DownloaderPanelState extends State<DownloaderPanel> {
                 ),
               ),
               const SizedBox(width: 4),
-              IconButton(backgroundColor: const Color(0xFF1A264F), icon: const Icon(Icons.search, color: Colors.cyanAccent, size: 18), onPressed: () => _searchNetwork(_searchController.text)),
-              IconButton(backgroundColor: const Color(0xFF2E1534), icon: const Icon(Icons.keyboard_return, color: Colors.orangeAccent, size: 18), onPressed: widget.onBackToPlayer)
+              IconButton(
+                style: IconButton.styleFrom(backgroundColor: const Color(0xFF1A264F)),
+                icon: const Icon(Icons.search, color: Colors.cyanAccent, size: 18), 
+                onPressed: () => _searchNetwork(_searchController.text)
+              ),
+              IconButton(
+                style: IconButton.styleFrom(backgroundColor: const Color(0xFF2E1534)),
+                icon: const Icon(Icons.keyboard_return, color: Colors.orangeAccent, size: 18), 
+                onPressed: widget.onBackToPlayer
+              )
             ],
           ),
           const SizedBox(height: 6),
@@ -157,7 +165,7 @@ class _DownloaderPanelState extends State<DownloaderPanel> {
             child: _buildWindowBox(
               title: 'SELECTED ELEMENT TRACKS INFO',
               child: _selectedItemDetails == null || _selectedItemDetails!['type'] == 'track'
-                  ? const Center(child: Text('[Selecciona un álbum o playlist arriba para desglosar sus pistas]', style: TextStyle(color: Colors.white24, fontSize: 11, style: FontStyle.italic)))
+                  ? const Center(child: Text('[Selecciona un álbum o playlist arriba para desglosar sus pistas]', style: TextStyle(color: Colors.white24, fontSize: 11, fontStyle: FontStyle.italic)))
                   : Column(
                       crossAxisAlignment: CrossAxisAlignment.stretch,
                       children: [

@@ -42,7 +42,7 @@ class LocalPlayerPanel extends StatelessWidget {
                 children: [
                   Expanded(
                     child: audioHandler.queue.isEmpty
-                        ? const Center(child: Text('No hay pistas cargadas. Añade archivos para comenzar.', style: TextStyle(color: Colors.white38, fontSize: 12), textAlign: Center.center))
+                        ? const Center(child: Text('No hay pistas cargadas. Añade archivos para comenzar.', style: TextStyle(color: Colors.white38, fontSize: 12), textAlign: TextAlign.center))
                         : ListView.builder(
                             itemCount: audioHandler.queue.length,
                             itemBuilder: (context, index) {
@@ -74,7 +74,7 @@ class LocalPlayerPanel extends StatelessWidget {
                       },
                       icon: const Icon(Icons.folder_open, size: 14),
                       label: const Text('Agregar pistas', style: TextStyle(fontSize: 11)),
-                      style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF1A264F), dense: true),
+                      style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF1A264F)),
                     ),
                   ),
                 ],
