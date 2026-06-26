@@ -1,4 +1,4 @@
-# EclipseShell
+# EclipseShell RES
 
 EclipseShell es un reproductor de música local con estética inspirada en MoonShell (NDS). Su objetivo es ofrecer una experiencia visual retro y una reproducción suave de archivos locales, con una interfaz cuidada y controles tipo "ventana".
 
