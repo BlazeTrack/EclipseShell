@@ -99,5 +99,6 @@ class _DownloadsPanelState extends State<DownloadsPanel> {
 // Extensión rápida de color por si acaso tu app usa una paleta oscura customizada
 extension on Colors {
   static MaterialColor get dark_purple => Colors.purple;
+
   
 }
