@@ -1,0 +1,1093 @@
+
+--- ARCHIVO: F:\Github\EclipseShell\lib\main.dart.FullName ---
+
+import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+import 'package:provider/provider.dart';
+import 'package:hive_flutter/hive_flutter.dart';
+import 'audio/audio_handler.dart';
+import 'ui/eclipse_shell_app.dart';
+
+void main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+  await SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
+  await Hive.initFlutter();
+  await Hive.openBox<List>('playlist');
+  await Hive.openBox('metadata');
+  await Hive.openBox('settings');
+  runApp(
+    MultiProvider(
+      providers: [
+        ChangeNotifierProvider(create: (_) => AudioHandlerImpl()),
+      ],
+      child: const MaterialApp(
+        title: 'EclipseShell',
+        debugShowCheckedModeBanner: false,
+        home: EclipseShellApp(),
+      ),
+    ),
+  );
+}
+
+--- ARCHIVO: F:\Github\EclipseShell\lib\audio\audio_handler.dart.FullName ---
+
+import 'dart:async';
+import 'dart:io';
+
+import 'package:flutter/foundation.dart' show ChangeNotifier, compute;
+import 'package:just_audio/just_audio.dart';
+import 'package:file_selector/file_selector.dart';
+import 'package:hive_flutter/hive_flutter.dart';
+import 'package:path_provider/path_provider.dart';
+import 'package:permission_handler/permission_handler.dart';
+import '../utils/scanner.dart';
+import '../utils/metadata.dart';
+
+class AudioHandlerImpl extends ChangeNotifier {
+  final AudioPlayer _player = AudioPlayer();
+  final ConcatenatingAudioSource _playlist = ConcatenatingAudioSource(children: []);
+  final List<String> _paths = [];
+  final List<Map<String, dynamic>> _metadata = [];
+  bool _loadingFromStorage = false;
+  bool _isShuffle = false;
+  String? _scanRoot;
+  String? _artDir;
+  bool lastScanPermissionDenied = false;
+
+  AudioHandlerImpl() {
+    _initialize();
+  }
+
+  Future<void> _initialize() async {
+    _player.playerStateStream.listen((_) => notifyListeners());
+    _player.currentIndexStream.listen((_) => notifyListeners());
+    _player.positionStream.listen((_) => notifyListeners());
+
+    try {
+      final dir = await getTemporaryDirectory();
+      _artDir = '${dir.path}/eclipse_art';
+      await Directory(_artDir!).create(recursive: true);
+    } catch (_) {}
+
+    // Attach the (empty) playlist to the player BEFORE restoring tracks so that
+    // later additions are live and playable. Restoring before this left the
+    // player without a usable source, so saved tracks would not play after a
+    // restart.
+    await _player.setAudioSource(_playlist);
+
+    final settingsBox = Hive.box('settings');
+    final storedScanRoot = settingsBox.get('scanRoot');
+    if (storedScanRoot is String && storedScanRoot.isNotEmpty) {
+      _scanRoot = storedScanRoot;
+    }
+
+    // Restore the saved playlist without auto-playing it.
+    _loadingFromStorage = true;
+    final playlistBox = Hive.box<List>('playlist');
+    final storedRaw = playlistBox.get('default');
+    final stored = storedRaw is List
+        ? List<String>.from(storedRaw.whereType<String>())
+        : <String>[];
+    if (stored.isNotEmpty) {
+      await addFiles(stored, persist: false, autoPlay: false);
+    }
+    _loadingFromStorage = false;
+    notifyListeners();
+  }
+
+  List<String> get queue => List.unmodifiable(_paths);
+
+  List<Map<String, dynamic>> get metadataList => List.unmodifiable(_metadata);
+
+  bool get isPlaying => _player.playing;
+
+  bool get isShuffle => _isShuffle;
+
+  Map<String, dynamic> get currentMetadata {
+    final index = _player.currentIndex;
+    if (index == null || index < 0 || index >= _metadata.length) return {'title': 'Sin pista seleccionada'};
+    return _metadata[index];
+  }
+
+  String? get currentTitle {
+    final meta = currentMetadata;
+    final t = meta['title'];
+    if (t is String && t.isNotEmpty) return t;
+    final idx = _player.currentIndex;
+    if (idx == null || idx < 0 || idx >= _paths.length) return null;
+    return _paths[idx].split(Platform.pathSeparator).last;
+  }
+
+
+  Stream<Duration> get positionStream => _player.positionStream;
+  Stream<Duration?> get durationStream => _player.durationStream;
+
+  Duration get position => _player.position;
+
+  Duration get duration => _player.duration ?? Duration.zero;
+
+  Future<void> _persist() async {
+    if (_loadingFromStorage) return;
+    final box = Hive.box<List>('playlist');
+    await box.put('default', _paths);
+  }
+
+  Future<void> setScanRoot(String path) async {
+    _scanRoot = path;
+    final settingsBox = Hive.box('settings');
+    await settingsBox.put('scanRoot', path);
+    notifyListeners();
+  }
+
+  String? get scanRoot => _scanRoot;
+
+  Future<List<String>> scanAndAddRoot({String? rootOverride}) async {
+    lastScanPermissionDenied = false;
+    final granted = await _ensureStoragePermission();
+    if (!granted) {
+      lastScanPermissionDenied = true;
+      notifyListeners();
+      return <String>[];
+    }
+    final rootPath = rootOverride ?? _scanRoot ?? _defaultScanRoot();
+    if (rootPath == null) return <String>[];
+    if (_scanRoot == null) {
+      await setScanRoot(rootPath);
+    }
+    final found = await compute(scanDirectoryPaths, rootPath);
+    await addFiles(found);
+    return found;
+  }
+
+  Future<bool> _ensureStoragePermission() async {
+    if (!Platform.isAndroid) return true;
+    if (await Permission.manageExternalStorage.isGranted) return true;
+    // Granular media permission (Android 13+) and legacy storage (<=12).
+    final audio = await Permission.audio.request();
+    final storage = await Permission.storage.request();
+    // All-files access is required to read arbitrary folders by raw path.
+    final manage = await Permission.manageExternalStorage.request();
+    return manage.isGranted || audio.isGranted || storage.isGranted;
+  }
+
+  Future<String?> pickScanRoot() async {
+    final selected = await getDirectoryPath();
+    if (selected != null && selected.isNotEmpty) {
+      final normalized = _normalizeAndroidDirPath(selected);
+      await setScanRoot(normalized);
+      return normalized;
+    }
+    return selected;
+  }
+
+  // file_selector may return a Storage Access Framework tree URI on Android
+  // (e.g. content://.../tree/primary:Music/Sub). Convert it to a raw filesystem
+  // path so the recursive scanner can read it.
+  String _normalizeAndroidDirPath(String p) {
+    if (!Platform.isAndroid) return p;
+    final decoded = Uri.decodeFull(p);
+    final match = RegExp(r'tree/([^:/]+):(.*)$').firstMatch(decoded);
+    if (match != null) {
+      final volume = match.group(1)!;
+      final rel = match.group(2) ?? '';
+      final base = volume == 'primary' ? '/storage/emulated/0' : '/storage/$volume';
+      return '$base/$rel'.replaceAll(RegExp(r'/+$'), '');
+    }
+    return p;
+  }
+
+  String? _defaultScanRoot() {
+    if (Platform.isAndroid) {
+      return '/storage/emulated/0/Download/EclipseMusic';
+    }
+    final home = Platform.environment['HOME'] ?? Platform.environment['USERPROFILE'] ?? '.';
+    return '$home/EclipseMusic';
+  }
+
+  Future<void> addFiles(List<String> paths, {bool persist = true, bool autoPlay = true}) async {
+    for (final path in paths) {
+      if (path.isEmpty) continue;
+      if (_paths.contains(path)) continue;
+      final fileName = path.split(Platform.pathSeparator).last;
+      _paths.add(path);
+      final metaBox = Hive.box('metadata');
+      Map<String, dynamic>? meta;
+      if (metaBox.containsKey(path)) {
+        final stored = metaBox.get(path);
+        if (stored is Map) meta = Map<String, dynamic>.from(stored);
+      }
+      meta ??= _buildMetadata(path, fileName);
+      _metadata.add(meta);
+      await _playlist.add(AudioSource.uri(Uri.file(path), tag: meta));
+      // persist metadata per-file
+      try {
+        await metaBox.put(path, meta);
+      } catch (_) {}
+    }
+    notifyListeners();
+    if (persist) await _persist();
+    if (autoPlay && !_player.playing && _paths.isNotEmpty) {
+      await playIndex(_paths.length - 1);
+    }
+  }
+
+  Map<String, dynamic> _buildMetadata(String path, String fileName) {
+    final tags = readTrackTags(path);
+    final meta = <String, dynamic>{
+      'title': tags.title ?? fileName,
+      'artist': tags.artist ?? '',
+      'album': tags.album ?? '',
+    };
+    final art = tags.artwork;
+    if (art != null && art.isNotEmpty && _artDir != null) {
+      try {
+        final artFile = File('$_artDir/${path.hashCode}.img');
+        artFile.writeAsBytesSync(art, flush: true);
+        meta['artPath'] = artFile.path;
+      } catch (_) {}
+    }
+    return meta;
+  }
+
+
+  Map<String, dynamic>? metadataForPath(String path) {
+    final box = Hive.box('metadata');
+    final v = box.get(path);
+    if (v == null) return null;
+    if (v is Map) return Map<String, dynamic>.from(v);
+    return null;
+  }
+
+
+  Future<void> play() async {
+    await _player.play();
+    notifyListeners();
+  }
+
+  Future<void> pause() async {
+    await _player.pause();
+    notifyListeners();
+  }
+
+  Future<void> stop() async {
+    await _player.stop();
+    notifyListeners();
+  }
+
+  Future<void> seekTo(Duration position) async {
+    await _player.seek(position);
+    notifyListeners();
+  }
+
+  Future<void> playIndex(int index) async {
+    if (index < 0 || index >= _paths.length) return;
+    await _player.seek(Duration.zero, index: index);
+    await play();
+    notifyListeners();
+  }
+
+  Future<void> skipToNext() async {
+    await _player.seekToNext();
+    notifyListeners();
+  }
+
+  Future<void> skipToPrevious() async {
+    await _player.seekToPrevious();
+    notifyListeners();
+  }
+
+  Future<void> toggleShuffle() async {
+    _isShuffle = !_isShuffle;
+    await _player.setShuffleModeEnabled(_isShuffle);
+    if (_isShuffle) {
+      await _player.shuffle();
+    }
+    notifyListeners();
+  }
+
+  @override
+  void dispose() {
+    _player.dispose();
+    super.dispose();
+  }
+}
+
+--- ARCHIVO: F:\Github\EclipseShell\lib\ui\eclipse_shell_app.dart.FullName ---
+
+import 'dart:io';
+import 'dart:math';
+
+import 'package:file_selector/file_selector.dart';
+import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+import 'package:provider/provider.dart';
+import '../audio/audio_handler.dart';
+import 'starfield_painter.dart'; // Importación vital para el fondo animado
+
+class EclipseShellApp extends StatefulWidget {
+  const EclipseShellApp({Key? key}) : super(key: key);
+
+  @override
+  State<EclipseShellApp> createState() => _EclipseShellAppState();
+}
+
+class _EclipseShellAppState extends State<EclipseShellApp> with WidgetsBindingObserver {
+  List<Offset>? _stars;
+  Size? _lastSize;
+  Offset? _eclipseCenter;
+  double? _eclipseRadius;
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addObserver(this);
+    SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
+    }
+  }
+
+  void _initializeStars(Size size) {
+    if (_lastSize == size) return;
+    _lastSize = size;
+    final rng = Random(12345);
+    _stars = List.generate(
+      120,
+      (_) => Offset(rng.nextDouble() * size.width, rng.nextDouble() * size.height),
+    );
+    _eclipseCenter = Offset(size.width * 0.8, size.height * 0.2);
+    _eclipseRadius = size.width * 0.18;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      backgroundColor: const Color(0xFF02030A),
+      body: LayoutBuilder(
+        builder: (context, constraints) {
+          _initializeStars(constraints.biggest);
+          return Stack(
+            children: [
+              Positioned.fill(
+                child: Container(
+                  decoration: const BoxDecoration(
+                    gradient: LinearGradient(
+                      begin: Alignment.topCenter,
+                      end: Alignment.bottomCenter,
+                      colors: [Color(0xFF02030A), Color(0xFF050818), Color(0xFF11172F)],
+                    ),
+                  ),
+                ),
+              ),
+              Positioned.fill(
+                child: CustomPaint(
+                  painter: StarfieldPainter(
+                    stars: _stars!,
+                    eclipseCenter: _eclipseCenter!,
+                    eclipseRadius: _eclipseRadius!,
+                  ),
+                ),
+              ),
+              SafeArea(
+                child: Padding(
+                  padding: const EdgeInsets.all(8),
+                  child: Column(
+                    children: [
+                      const SizedBox(height: 4),
+                      Center(
+                        child: ConstrainedBox(
+                          constraints: const BoxConstraints(maxWidth: 520),
+                          child: TextField(
+                            readOnly: true,
+                            decoration: InputDecoration(
+                              hintText: 'Buscar...',
+                              hintStyle: TextStyle(color: Colors.white54),
+                              prefixIcon: Icon(Icons.search, color: Colors.white54),
+                              filled: true,
+                              fillColor: Color(0xFF0B1226),
+                              contentPadding: EdgeInsets.symmetric(vertical: 12.0, horizontal: 12.0),
+                              border: OutlineInputBorder(
+                                borderRadius: BorderRadius.circular(8.0),
+                                borderSide: BorderSide(color: Color(0xFF3A4B7C)),
+                              ),
+                              enabledBorder: OutlineInputBorder(
+                                borderRadius: BorderRadius.circular(8.0),
+                                borderSide: BorderSide(color: Color(0xFF3A4B7C)),
+                              ),
+                            ),
+                            style: const TextStyle(color: Colors.white),
+                          ),
+                        ),
+                      ),
+                      const SizedBox(height: 4),
+                      Flexible(
+                        flex: 5,
+                        child: _buildWindow(
+                          title: 'ECLIPSESHELL FILE EXPLORER',
+                          child: _buildFileExplorer(),
+                        ),
+                      ),
+                      const SizedBox(height: 8),
+                      Flexible(
+                        flex: 4,
+                        child: _buildWindow(
+                          title: 'PLAYCONTROL',
+                          child: _buildPlayControl(),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ],
+          );
+        },
+      ),
+    );
+  }
+
+  Widget _buildWindow({required String title, required Widget child}) {
+    return Card(
+      color: Colors.black45,
+      shape: RoundedRectangleBorder(
+        side: const BorderSide(color: Color(0xFF3A4B7C), width: 2),
+        borderRadius: BorderRadius.circular(4),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Container(
+            color: const Color(0xFF1A264F),
+            width: double.infinity,
+            padding: const EdgeInsets.all(6.0),
+            child: Text(
+              title,
+              style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 12),
+            ),
+          ),
+          Expanded(child: child),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildFileExplorer() {
+    final audioHandler = Provider.of<AudioHandlerImpl>(context);
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Expanded(
+          child: audioHandler.queue.isEmpty
+              ? Center(
+                  child: Text(
+                    'No hay pistas cargadas. Añade archivos para comenzar a reproducir.',
+                    style: const TextStyle(color: Colors.white70),
+                    textAlign: TextAlign.center,
+                  ),
+                )
+              : ListView.builder(
+                  itemCount: audioHandler.queue.length,
+                  itemBuilder: (context, index) {
+                    final path = audioHandler.queue[index];
+                    final meta = audioHandler.metadataForPath(path) ?? {'title': path.split(Platform.pathSeparator).last};
+                    final title = meta['title'] ?? path.split(Platform.pathSeparator).last;
+                    final isActive = audioHandler.currentTitle == title;
+                    return ListTile(
+                      title: Text(
+                        title,
+                        style: TextStyle(color: isActive ? Colors.cyanAccent : Colors.white70),
+                      ),
+                      subtitle: (meta['artist'] != null && (meta['artist'] as String).isNotEmpty)
+                          ? Text(meta['artist'], style: const TextStyle(color: Colors.white54, fontSize: 12))
+                          : null,
+                      onTap: () => audioHandler.playIndex(index),
+                      leading: _trackArt(
+                        meta['artPath'] as String?,
+                        size: 40,
+                        iconColor: isActive ? Colors.cyanAccent : Colors.white70,
+                      ),
+                      trailing: isActive ? const Icon(Icons.play_arrow, color: Colors.cyanAccent) : null,
+                    );
+                  },
+                ),
+        ),
+        const SizedBox(height: 8),
+        ElevatedButton.icon(
+          onPressed: () async {
+            final typeGroup = XTypeGroup(
+              label: 'audio',
+              extensions: ['mp3', 'wav', 'm4a', 'aac', 'flac', 'ogg'],
+            );
+            final files = await openFiles(acceptedTypeGroups: [typeGroup]);
+            if (files.isEmpty) return;
+            final paths = files.map((file) => file.path).whereType<String>().toList();
+            if (paths.isEmpty) return;
+            await audioHandler.addFiles(paths);
+          },
+          icon: const Icon(Icons.folder_open),
+          label: const Text('Agregar pistas'),
+          style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF1A264F)),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildPlayControl() {
+    final audioHandler = Provider.of<AudioHandlerImpl>(context);
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 8.0, vertical: 12.0),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          const Text('Reproduciendo', style: TextStyle(color: Colors.white70, fontWeight: FontWeight.bold)),
+          const SizedBox(height: 8),
+          Row(
+            children: [
+              Container(
+                width: 56,
+                height: 56,
+                margin: const EdgeInsets.only(right: 12),
+                clipBehavior: Clip.antiAlias,
+                decoration: BoxDecoration(color: Colors.white12, borderRadius: BorderRadius.circular(6)),
+                child: _trackArt(audioHandler.currentMetadata['artPath'] as String?, size: 56),
+              ),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      audioHandler.currentMetadata['title'] ?? 'Sin pista seleccionada',
+                      style: const TextStyle(color: Colors.white, fontSize: 16),
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      '${audioHandler.currentMetadata['artist'] ?? ''} · ${audioHandler.currentMetadata['album'] ?? ''}',
+                      style: const TextStyle(color: Colors.white70, fontSize: 12),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 6),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              IconButton(
+                onPressed: audioHandler.skipToPrevious,
+                icon: const Icon(Icons.skip_previous, color: Colors.white),
+              ),
+              IconButton(
+                onPressed: audioHandler.isPlaying ? audioHandler.pause : audioHandler.play,
+                icon: Icon(
+                  audioHandler.isPlaying ? Icons.pause_circle : Icons.play_circle,
+                  color: Colors.white,
+                  size: 40,
+                ),
+              ),
+              IconButton(
+                onPressed: audioHandler.skipToNext,
+                icon: const Icon(Icons.skip_next, color: Colors.white),
+              ),
+            ],
+          ),
+          const SizedBox(height: 4),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              IconButton(
+                onPressed: () async => await audioHandler.toggleShuffle(),
+                icon: Icon(audioHandler.isShuffle ? Icons.shuffle_on : Icons.shuffle, color: Colors.white),
+                iconSize: 26,
+                padding: const EdgeInsets.all(6),
+              ),
+              Row(
+                children: [
+                  ElevatedButton.icon(
+                    onPressed: () async {
+                      final selectedRoot = await audioHandler.pickScanRoot();
+                      if (!mounted) return;
+                      if (selectedRoot == null || selectedRoot.isEmpty) {
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          const SnackBar(content: Text('No se seleccionó carpeta')),
+                        );
+                        return;
+                      }
+                      final found = await audioHandler.scanAndAddRoot(rootOverride: selectedRoot);
+                      if (!mounted) return;
+                      if (audioHandler.lastScanPermissionDenied) {
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          const SnackBar(content: Text('Permiso de almacenamiento denegado. Actívalo para escanear.')),
+                        );
+                        return;
+                      }
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        SnackBar(content: Text('Scan completed: ${found.length} tracks found in $selectedRoot')),
+                      );
+                    },
+                    icon: const Icon(Icons.folder_open, size: 18),
+                    label: const Text('Seleccionar carpeta', style: TextStyle(fontSize: 12)),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: const Color(0xFF1A264F),
+                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  ElevatedButton.icon(
+                    onPressed: () async {
+                      final found = await audioHandler.scanAndAddRoot();
+                      if (!mounted) return;
+                      if (audioHandler.lastScanPermissionDenied) {
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          const SnackBar(content: Text('Permiso de almacenamiento denegado. Actívalo para escanear.')),
+                        );
+                        return;
+                      }
+                      final root = audioHandler.scanRoot ?? '/storage/emulated/0/Download/EclipseMusic';
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        SnackBar(content: Text('Scan completed: ${found.length} tracks found in $root')),
+                      );
+                    },
+                    icon: const Icon(Icons.search, size: 18),
+                    label: const Text('Escanear carpeta', style: TextStyle(fontSize: 12)),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: const Color(0xFF1A264F),
+                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                    ),
+                  ),
+                ],
+              ),
+            ],
+          ),
+          const SizedBox(height: 4),
+          Text(
+            audioHandler.scanRoot != null
+                ? 'Carpeta actual: ${audioHandler.scanRoot}'
+                : 'Carpeta por defecto: /storage/emulated/0/Download/EclipseMusic',
+            style: const TextStyle(color: Colors.white54, fontSize: 11),
+          ),
+          const SizedBox(height: 4),
+          StreamBuilder<Duration>(
+            stream: audioHandler.positionStream,
+            builder: (context, snapshotPos) {
+              final pos = snapshotPos.data ?? Duration.zero;
+              final dur = audioHandler.duration;
+              final value = dur.inMilliseconds == 0 ? 0.0 : pos.inMilliseconds / dur.inMilliseconds;
+              return Column(
+                children: [
+                  Slider(
+                    value: value.clamp(0.0, 1.0),
+                    onChanged: (v) {
+                      final target = Duration(milliseconds: (v * dur.inMilliseconds).round());
+                      audioHandler.seekTo(target);
+                    },
+                    activeColor: Colors.cyanAccent,
+                    inactiveColor: Colors.white12,
+                  ),
+                  const SizedBox(height: 3),
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      Text(_formatDuration(pos), style: const TextStyle(color: Colors.white70, fontSize: 12)),
+                      Text(_formatDuration(dur), style: const TextStyle(color: Colors.white70, fontSize: 12)),
+                    ],
+                  ),
+                ],
+              );
+            },
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _trackArt(String? artPath, {double size = 40, Color iconColor = Colors.white70}) {
+    if (artPath != null && artPath.isNotEmpty && File(artPath).existsSync()) {
+      return ClipRRect(
+        borderRadius: BorderRadius.circular(6),
+        child: Image.file(
+          File(artPath),
+          width: size,
+          height: size,
+          fit: BoxFit.cover,
+          errorBuilder: (_, __, ___) => Icon(Icons.music_note, color: iconColor, size: size * 0.55),
+        ),
+      );
+    }
+    return Icon(Icons.music_note, color: iconColor, size: size * 0.6);
+  }
+
+  String _formatDuration(Duration duration) {
+    final minutes = duration.inMinutes.remainder(60).toString().padLeft(2, '0');
+    final seconds = duration.inSeconds.remainder(60).toString().padLeft(2, '0');
+    return '$minutes:$seconds';
+  }
+}
+
+--- ARCHIVO: F:\Github\EclipseShell\lib\ui\starfield_painter.dart.FullName ---
+
+import 'package:flutter/material.dart';
+
+class StarfieldPainter extends CustomPainter {
+  final List<Offset> stars;
+  final Offset eclipseCenter;
+  final double eclipseRadius;
+
+  const StarfieldPainter({
+    required this.stars,
+    required this.eclipseCenter,
+    required this.eclipseRadius,
+  });
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final paint = Paint()..color = Colors.white.withOpacity(0.3);
+    for (final star in stars) {
+      final radius = 0.4 + (star.dx + star.dy) % 1.6;
+      canvas.drawCircle(star, radius, paint);
+    }
+
+    final eclipsePaint = Paint()
+      ..shader = RadialGradient(
+        colors: [Colors.white24, Colors.transparent],
+        stops: const [0.0, 1.0],
+      ).createShader(Rect.fromCircle(center: eclipseCenter, radius: eclipseRadius));
+
+    canvas.drawCircle(eclipseCenter, eclipseRadius, eclipsePaint);
+  }
+
+  @override
+  bool shouldRepaint(covariant StarfieldPainter oldDelegate) {
+    return oldDelegate.stars != stars ||
+        oldDelegate.eclipseCenter != eclipseCenter ||
+        oldDelegate.eclipseRadius != eclipseRadius;
+  }
+}
+
+--- ARCHIVO: F:\Github\EclipseShell\lib\utils\metadata.dart.FullName ---
+
+import 'dart:convert';
+import 'dart:io';
+import 'dart:typed_data';
+
+/// Tags parsed from an audio file using a pure-Dart ID3 reader (no native deps).
+class TrackTags {
+  final String? title;
+  final String? artist;
+  final String? album;
+  final Uint8List? artwork;
+
+  const TrackTags({this.title, this.artist, this.album, this.artwork});
+}
+
+/// Reads title/artist/album and embedded cover art from a file.
+/// Tries ID3v2 (mp3) first, then falls back to ID3v1. Returns empty tags on
+/// failure; the caller decides how to fall back (e.g. to the file name).
+TrackTags readTrackTags(String path) {
+  try {
+    final file = File(path);
+    if (!file.existsSync()) return const TrackTags();
+    final v2 = _readId3v2(file);
+    if (v2 != null) return v2;
+    final v1 = _readId3v1(file);
+    if (v1 != null) return v1;
+  } catch (_) {}
+  return const TrackTags();
+}
+
+int _synchsafe(int b1, int b2, int b3, int b4) =>
+    ((b1 & 0x7f) << 21) | ((b2 & 0x7f) << 14) | ((b3 & 0x7f) << 7) | (b4 & 0x7f);
+
+int _be(int b1, int b2, int b3, int b4) =>
+    (b1 << 24) | (b2 << 16) | (b3 << 8) | b4;
+
+TrackTags? _readId3v2(File file) {
+  final raf = file.openSync(mode: FileMode.read);
+  try {
+    final len = raf.lengthSync();
+    if (len < 10) return null;
+    final header = raf.readSync(10);
+    if (header[0] != 0x49 || header[1] != 0x44 || header[2] != 0x33) {
+      return null; // not "ID3"
+    }
+    final major = header[3];
+    final tagSize = _synchsafe(header[6], header[7], header[8], header[9]);
+    if (tagSize <= 0 || tagSize > len) return null;
+    final body = raf.readSync(tagSize);
+
+    String? title;
+    String? artist;
+    String? album;
+    Uint8List? artwork;
+
+    final idLen = major == 2 ? 3 : 4;
+    final sizeLen = major == 2 ? 3 : 4;
+    int pos = 0;
+    while (pos + idLen + sizeLen <= body.length) {
+      final id = String.fromCharCodes(body.sublist(pos, pos + idLen));
+      if (id.codeUnitAt(0) == 0) break; // padding
+
+      int frameSize;
+      int headerLen;
+      if (major == 2) {
+        frameSize = (body[pos + 3] << 16) | (body[pos + 4] << 8) | body[pos + 5];
+        headerLen = 6;
+      } else {
+        final s1 = body[pos + 4], s2 = body[pos + 5], s3 = body[pos + 6], s4 = body[pos + 7];
+        frameSize = major == 4 ? _synchsafe(s1, s2, s3, s4) : _be(s1, s2, s3, s4);
+        headerLen = 10;
+      }
+      final dataStart = pos + headerLen;
+      if (frameSize <= 0 || dataStart + frameSize > body.length) break;
+      final data = body.sublist(dataStart, dataStart + frameSize);
+
+      if (id == 'TIT2' || id == 'TT2') {
+        title = _decodeText(data);
+      } else if (id == 'TPE1' || id == 'TP1') {
+        artist = _decodeText(data);
+      } else if (id == 'TALB' || id == 'TAL') {
+        album = _decodeText(data);
+      } else if (id == 'APIC' || id == 'PIC') {
+        artwork ??= _decodeApic(data, major);
+      }
+
+      pos = dataStart + frameSize;
+    }
+
+    if (title == null && artist == null && album == null && artwork == null) {
+      return null;
+    }
+    return TrackTags(
+      title: _clean(title),
+      artist: _clean(artist),
+      album: _clean(album),
+      artwork: artwork,
+    );
+  } finally {
+    raf.closeSync();
+  }
+}
+
+String? _clean(String? s) {
+  if (s == null) return null;
+  final t = s.replaceAll('\u0000', '').trim();
+  return t.isEmpty ? null : t;
+}
+
+String _decodeText(List<int> data) {
+  if (data.isEmpty) return '';
+  final encoding = data[0];
+  final bytes = data.sublist(1);
+  return _decodeByEncoding(encoding, bytes);
+}
+
+String _decodeByEncoding(int encoding, List<int> bytes) {
+  try {
+    switch (encoding) {
+      case 0: // ISO-8859-1
+        return latin1.decode(bytes, allowInvalid: true);
+      case 1: // UTF-16 with BOM
+        return _decodeUtf16(bytes);
+      case 2: // UTF-16BE without BOM
+        return _decodeUtf16(bytes, bigEndian: true);
+      case 3: // UTF-8
+      default:
+        return utf8.decode(bytes, allowMalformed: true);
+    }
+  } catch (_) {
+    return latin1.decode(bytes, allowInvalid: true);
+  }
+}
+
+String _decodeUtf16(List<int> bytes, {bool bigEndian = false}) {
+  var data = bytes;
+  var be = bigEndian;
+  if (data.length >= 2) {
+    if (data[0] == 0xFF && data[1] == 0xFE) {
+      be = false;
+      data = data.sublist(2);
+    } else if (data[0] == 0xFE && data[1] == 0xFF) {
+      be = true;
+      data = data.sublist(2);
+    }
+  }
+  final units = <int>[];
+  for (var i = 0; i + 1 < data.length; i += 2) {
+    units.add(be ? (data[i] << 8) | data[i + 1] : (data[i + 1] << 8) | data[i]);
+  }
+  return String.fromCharCodes(units);
+}
+
+Uint8List? _decodeApic(List<int> data, int major) {
+  if (data.isEmpty) return null;
+  final encoding = data[0];
+  int i = 1;
+  if (major == 2) {
+    // v2.2 PIC: 3-byte image format instead of MIME string.
+    i += 3;
+  } else {
+    // MIME type, null-terminated ISO-8859-1.
+    while (i < data.length && data[i] != 0) {
+      i++;
+    }
+    i++; // skip null
+  }
+  if (i >= data.length) return null;
+  i++; // picture type byte
+  // Description, terminated by null (single byte) or double-null (UTF-16).
+  if (encoding == 1 || encoding == 2) {
+    while (i + 1 < data.length && !(data[i] == 0 && data[i + 1] == 0)) {
+      i += 2;
+    }
+    i += 2;
+  } else {
+    while (i < data.length && data[i] != 0) {
+      i++;
+    }
+    i++;
+  }
+  if (i >= data.length) return null;
+  return Uint8List.fromList(data.sublist(i));
+}
+
+TrackTags? _readId3v1(File file) {
+  final raf = file.openSync(mode: FileMode.read);
+  try {
+    final len = raf.lengthSync();
+    if (len < 128) return null;
+    raf.setPositionSync(len - 128);
+    final bytes = raf.readSync(128);
+    if (bytes[0] != 0x54 || bytes[1] != 0x41 || bytes[2] != 0x47) {
+      return null; // not "TAG"
+    }
+    String read(int start, int end) =>
+        latin1.decode(bytes.sublist(start, end), allowInvalid: true);
+    return TrackTags(
+      title: _clean(read(3, 33)),
+      artist: _clean(read(33, 63)),
+      album: _clean(read(63, 93)),
+    );
+  } finally {
+    raf.closeSync();
+  }
+}
+
+--- ARCHIVO: F:\Github\EclipseShell\lib\utils\scanner.dart.FullName ---
+
+import 'dart:io';
+
+// Top-level function for compute/isolate usage.
+List<String> scanDirectoryPaths(String rootPath) {
+  final results = <String>[];
+  try {
+    final root = Directory(rootPath);
+    if (!root.existsSync()) return results;
+    final walker = root.listSync(recursive: true);
+    for (final entry in walker) {
+      if (entry is File) {
+        final path = entry.path.toLowerCase();
+        if (path.endsWith('.mp3') || path.endsWith('.wav') || path.endsWith('.m4a') || path.endsWith('.aac') || path.endsWith('.flac') || path.endsWith('.ogg')) {
+          results.add(entry.path);
+        }
+      }
+    }
+  } catch (_) {
+    // ignore errors, return what we found
+  }
+  return results;
+}
+
+--- ARCHIVO: F:\Github\EclipseShell\test\metadata_test.dart.FullName ---
+
+import 'dart:io';
+import 'dart:typed_data';
+
+import 'package:flutter_test/flutter_test.dart';
+import 'package:eclipse_shell/utils/metadata.dart';
+
+/// Encodes [size] as a 32-bit synchsafe integer (used by the ID3v2 header).
+List<int> _synchsafe(int size) => [
+      (size >> 21) & 0x7f,
+      (size >> 14) & 0x7f,
+      (size >> 7) & 0x7f,
+      size & 0x7f,
+    ];
+
+/// Encodes [size] as a plain 32-bit big-endian integer (ID3v2.3 frame size).
+List<int> _be32(int size) => [
+      (size >> 24) & 0xff,
+      (size >> 16) & 0xff,
+      (size >> 8) & 0xff,
+      size & 0xff,
+    ];
+
+List<int> _frame(String id, List<int> data) =>
+    [...id.codeUnits, ..._be32(data.length), 0, 0, ...data];
+
+void main() {
+  test('reads ID3v2.3 title/artist/album and embedded APIC art', () async {
+    final pngBytes = Uint8List.fromList([0x89, 0x50, 0x4e, 0x47, 1, 2, 3, 4, 5]);
+
+    final tit2 = _frame('TIT2', [0x00, ...'My Song'.codeUnits]);
+    final tpe1 = _frame('TPE1', [0x00, ...'My Artist'.codeUnits]);
+    final talb = _frame('TALB', [0x00, ...'My Album'.codeUnits]);
+    final apic = _frame('APIC', [
+      0x00, // ISO-8859-1 encoding
+      ...'image/png'.codeUnits, 0x00, // MIME, null-terminated
+      0x03, // picture type: front cover
+      0x00, // empty description, null-terminated
+      ...pngBytes,
+    ]);
+
+    final body = [...tit2, ...tpe1, ...talb, ...apic];
+    final tag = [
+      ...'ID3'.codeUnits, 0x03, 0x00, 0x00, // header: v2.3, no flags
+      ..._synchsafe(body.length),
+      ...body,
+    ];
+    // Append some fake audio frame bytes after the tag.
+    final fileBytes = [...tag, 0xff, 0xfb, 0x90, 0x00];
+
+    final tmp = File(
+        '${Directory.systemTemp.path}/eclipse_meta_test_${DateTime.now().microsecondsSinceEpoch}.mp3');
+    tmp.writeAsBytesSync(fileBytes, flush: true);
+    addTearDown(() {
+      if (tmp.existsSync()) tmp.deleteSync();
+    });
+
+    final tags = readTrackTags(tmp.path);
+
+    expect(tags.title, 'My Song');
+    expect(tags.artist, 'My Artist');
+    expect(tags.album, 'My Album');
+    expect(tags.artwork, isNotNull);
+    expect(tags.artwork, equals(pngBytes));
+  });
+
+  test('returns empty tags for a file with no ID3 metadata', () {
+    final tmp = File(
+        '${Directory.systemTemp.path}/eclipse_meta_empty_${DateTime.now().microsecondsSinceEpoch}.mp3');
+    tmp.writeAsBytesSync([0xff, 0xfb, 0x90, 0x00, 1, 2, 3, 4], flush: true);
+    addTearDown(() {
+      if (tmp.existsSync()) tmp.deleteSync();
+    });
+
+    final tags = readTrackTags(tmp.path);
+    expect(tags.title, isNull);
+    expect(tags.artwork, isNull);
+  });
+}
