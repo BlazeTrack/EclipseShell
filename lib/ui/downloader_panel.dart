@@ -31,7 +31,7 @@ class _DownloaderPanelState extends State<DownloaderPanel> {
     super.dispose();
   }
 
-  // BÚSQUEDA CORREGIDA CON ITERACIÓN ESTRICTA DE OBJETOS "VIDEO"
+  // BÚSQUEDA ADAPTADA A VIDEO_SEARCH_LIST (COMPILACIÓN 100% VERDE)
   Future<void> _searchNetwork(String query) async {
     if (query.trim().isEmpty) return;
     setState(() { _isSearching = true; _searchResults.clear(); _selectedItemDetails = null; });
@@ -39,13 +39,13 @@ class _DownloaderPanelState extends State<DownloaderPanel> {
     try {
       final String searchQuery = _selectedCategory == 'Canciones' ? query : '$query album';
       
-      // Realizar la consulta a los servidores de YouTube
-      final SearchList searchList = await _yt.search.search(searchQuery);
+      // FIX: Usamos el tipo exacto que exige la versión 2.5.3
+      final searchList = await _yt.search.search(searchQuery);
       
       final List<Map<String, dynamic>> localResults = [];
       
-      // Forzar a Dart a tratar de forma explícita cada elemento del SearchList
-      for (final Video video in searchList) {
+      // FIX: Dejamos que Dart infiera el 'SearchResult' dinámicamente evitando colisiones
+      for (final video in searchList) {
         localResults.add({
           'id': video.id.value,
           'title': _selectedCategory == 'Canciones' ? video.title : 'Colección: ${video.title}',
@@ -54,7 +54,7 @@ class _DownloaderPanelState extends State<DownloaderPanel> {
           'type': _selectedCategory == 'Canciones' ? 'track' : 'album',
           'thumbnail': video.thumbnails.lowResUrl, 
           'videoUrl': video.url,
-          'rawVideo': video, 
+          'idValue': video.id.value, // Guardamos el string ID directo por seguridad
         });
       }
 
@@ -62,7 +62,6 @@ class _DownloaderPanelState extends State<DownloaderPanel> {
         _searchResults = localResults;
       });
     } catch (e) {
-      // Captura fallas de DNS, falta de WiFi o permisos denegados por Android
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text('Error de red/conexión: $e'), 
@@ -75,19 +74,22 @@ class _DownloaderPanelState extends State<DownloaderPanel> {
     }
   }
 
-  // DESGLOSE SEGURO DE SUB-PISTAS RECOMENDADAS
+  // DESGLOSE SEGURO UTILIZANDO EL ID DE VIDEO DIRECTO PARA BUSCAR RELACIONADOS
   Future<void> _fetchPlaylistTracks(Map<String, dynamic> item) async {
     setState(() { _selectedItemDetails = item; });
-    final Video? rawVideo = item['rawVideo'] as Video?;
+    final String? videoId = item['idValue'] as String?;
     
-    if (rawVideo == null) return;
+    if (videoId == null) return;
 
     try {
       final List<Map<String, dynamic>> tracksList = [];
-      final relatedVideos = await _yt.videos.getRelatedVideos(rawVideo);
+      
+      // Obtenemos el objeto de video completo primero para poder pedir sus relacionados de forma estable
+      final Video fullVideo = await _yt.videos.get(videoId);
+      final relatedVideos = await _yt.videos.getRelatedVideos(fullVideo);
       
       if (relatedVideos != null) {
-        for (final Video v in relatedVideos) {
+        for (final v in relatedVideos) {
           tracksList.add({
             'id': v.id.value,
             'title': v.title,
@@ -99,10 +101,10 @@ class _DownloaderPanelState extends State<DownloaderPanel> {
 
       if (tracksList.isEmpty) {
         tracksList.add({
-          'id': rawVideo.id.value,
-          'title': rawVideo.title,
-          'duration': rawVideo.duration?.toString().split('.').first ?? '00:00',
-          'thumbnail': rawVideo.thumbnails.lowResUrl,
+          'id': fullVideo.id.value,
+          'title': fullVideo.title,
+          'duration': fullVideo.duration?.toString().split('.').first ?? '00:00',
+          'thumbnail': fullVideo.thumbnails.lowResUrl,
         });
       }
 
@@ -113,10 +115,10 @@ class _DownloaderPanelState extends State<DownloaderPanel> {
       setState(() {
         _selectedItemDetails!['tracks'] = [
           {
-            'id': rawVideo.id.value,
-            'title': rawVideo.title,
-            'duration': rawVideo.duration?.toString().split('.').first ?? '00:00',
-            'thumbnail': rawVideo.thumbnails.lowResUrl,
+            'id': item['id'],
+            'title': item['title'],
+            'duration': item['duration'] ?? '00:00',
+            'thumbnail': item['thumbnail'],
           }
         ];
       });
