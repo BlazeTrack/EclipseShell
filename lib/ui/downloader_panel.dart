@@ -19,6 +19,8 @@ class _DownloaderPanelState extends State<DownloaderPanel> {
   bool _isSearching = false;
 
   final YoutubeExplode _yt = YoutubeExplode();
+  
+  // Forzamos el tipo explícito para evitar que Dart asuma que es un SearchList
   List<Map<String, dynamic>> _searchResults = [];
   Map<String, dynamic>? _selectedItemDetails;
   final Map<String, double> _downloadProgress = {};
@@ -30,21 +32,23 @@ class _DownloaderPanelState extends State<DownloaderPanel> {
     super.dispose();
   }
 
-  // BÚSQUEDA ROBUSTA COMPATIBLE CON CUALQUIER VERSIÓN (MÉTODO GENERAL)
+  // BÚSQUEDA BLINDADA CONTRA ERRORES DE SUBTIPO
   Future<void> _searchNetwork(String query) async {
     if (query.trim().isEmpty) return;
     setState(() { _isSearching = true; _searchResults.clear(); _selectedItemDetails = null; });
 
     try {
-      // Usamos el buscador general que sabemos que es 100% estable y no cambia entre versiones
-      final searchList = await _yt.search.search(
-        _selectedCategory == 'Canciones' ? query : '$query album'
-      );
+      final String searchQuery = _selectedCategory == 'Canciones' ? query : '$query album';
       
-      final List<Map<String, dynamic>> parsedResults = [];
+      // 1. Obtenemos el objeto SearchList de la librería
+      final searchList = await _yt.search.search(searchQuery);
       
+      // 2. Creamos una lista nativa real de Dart
+      final List<Map<String, dynamic>> localResults = [];
+      
+      // 3. Extraemos manualmente cada video al formato nativo
       for (final video in searchList) {
-        parsedResults.add({
+        localResults.add({
           'id': video.id.value,
           'title': _selectedCategory == 'Canciones' ? video.title : 'Colección: ${video.title}',
           'author': video.author,
@@ -52,12 +56,13 @@ class _DownloaderPanelState extends State<DownloaderPanel> {
           'type': _selectedCategory == 'Canciones' ? 'track' : 'album',
           'thumbnail': video.thumbnails.lowResUrl, 
           'videoUrl': video.url,
-          'rawVideo': video, // Guardamos la referencia por si se desglosa como álbum
+          'rawVideo': video, 
         });
       }
 
+      // 4. Asignamos la lista limpia al estado
       setState(() {
-        _searchResults = parsedResults;
+        _searchResults = localResults;
       });
     } catch (e) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -68,7 +73,7 @@ class _DownloaderPanelState extends State<DownloaderPanel> {
     }
   }
 
-  // DESGLOSE REAL DE CONTENIDO UTILIZANDO VIDEOS RELACIONADOS (SIMULA EL ÁLBUM DE FORMA ESTABLE)
+  // DESGLOSE SEGURO DE SUB-PISTAS
   Future<void> _fetchPlaylistTracks(Map<String, dynamic> item) async {
     setState(() { _selectedItemDetails = item; });
     final Video? rawVideo = item['rawVideo'] as Video?;
@@ -77,7 +82,6 @@ class _DownloaderPanelState extends State<DownloaderPanel> {
 
     try {
       final List<Map<String, dynamic>> tracksList = [];
-      // Obtenemos recomendaciones y mixes reales asociados a este track/álbum
       final relatedVideos = await _yt.videos.getRelatedVideos(rawVideo);
       
       if (relatedVideos != null) {
@@ -91,7 +95,6 @@ class _DownloaderPanelState extends State<DownloaderPanel> {
         }
       }
 
-      // Si por alguna razón no devolvió relacionados, agregamos al menos el track principal
       if (tracksList.isEmpty) {
         tracksList.add({
           'id': rawVideo.id.value,
@@ -105,7 +108,6 @@ class _DownloaderPanelState extends State<DownloaderPanel> {
         _selectedItemDetails!['tracks'] = tracksList;
       });
     } catch (e) {
-      // Fallback seguro: si falla la API de relacionados, dejamos la canción base
       setState(() {
         _selectedItemDetails!['tracks'] = [
           {
