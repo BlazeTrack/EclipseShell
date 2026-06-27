@@ -20,7 +20,6 @@ class _DownloaderPanelState extends State<DownloaderPanel> {
 
   final YoutubeExplode _yt = YoutubeExplode();
   
-  // Forzamos el tipo explícito para evitar que Dart asuma que es un SearchList
   List<Map<String, dynamic>> _searchResults = [];
   Map<String, dynamic>? _selectedItemDetails;
   final Map<String, double> _downloadProgress = {};
@@ -32,7 +31,7 @@ class _DownloaderPanelState extends State<DownloaderPanel> {
     super.dispose();
   }
 
-  // BÚSQUEDA BLINDADA CONTRA ERRORES DE SUBTIPO
+  // BÚSQUEDA CORREGIDA CON ITERACIÓN ESTRICTA DE OBJETOS "VIDEO"
   Future<void> _searchNetwork(String query) async {
     if (query.trim().isEmpty) return;
     setState(() { _isSearching = true; _searchResults.clear(); _selectedItemDetails = null; });
@@ -40,14 +39,13 @@ class _DownloaderPanelState extends State<DownloaderPanel> {
     try {
       final String searchQuery = _selectedCategory == 'Canciones' ? query : '$query album';
       
-      // 1. Obtenemos el objeto SearchList de la librería
-      final searchList = await _yt.search.search(searchQuery);
+      // Realizar la consulta a los servidores de YouTube
+      final SearchList searchList = await _yt.search.search(searchQuery);
       
-      // 2. Creamos una lista nativa real de Dart
       final List<Map<String, dynamic>> localResults = [];
       
-      // 3. Extraemos manualmente cada video al formato nativo
-      for (final video in searchList) {
+      // Forzar a Dart a tratar de forma explícita cada elemento del SearchList
+      for (final Video video in searchList) {
         localResults.add({
           'id': video.id.value,
           'title': _selectedCategory == 'Canciones' ? video.title : 'Colección: ${video.title}',
@@ -60,20 +58,24 @@ class _DownloaderPanelState extends State<DownloaderPanel> {
         });
       }
 
-      // 4. Asignamos la lista limpia al estado
       setState(() {
         _searchResults = localResults;
       });
     } catch (e) {
+      // Captura fallas de DNS, falta de WiFi o permisos denegados por Android
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Error de red: $e'), backgroundColor: Colors.red.shade900)
+        SnackBar(
+          content: Text('Error de red/conexión: $e'), 
+          backgroundColor: Colors.red.shade900,
+          duration: const Duration(seconds: 6),
+        )
       );
     } finally {
       setState(() { _isSearching = false; });
     }
   }
 
-  // DESGLOSE SEGURO DE SUB-PISTAS
+  // DESGLOSE SEGURO DE SUB-PISTAS RECOMENDADAS
   Future<void> _fetchPlaylistTracks(Map<String, dynamic> item) async {
     setState(() { _selectedItemDetails = item; });
     final Video? rawVideo = item['rawVideo'] as Video?;
@@ -85,7 +87,7 @@ class _DownloaderPanelState extends State<DownloaderPanel> {
       final relatedVideos = await _yt.videos.getRelatedVideos(rawVideo);
       
       if (relatedVideos != null) {
-        for (final v in relatedVideos) {
+        for (final Video v in relatedVideos) {
           tracksList.add({
             'id': v.id.value,
             'title': v.title,
@@ -121,7 +123,7 @@ class _DownloaderPanelState extends State<DownloaderPanel> {
     }
   }
 
-  // DESCARGA REAL DE AUDIO HQ DIRECTA A LA CARPETA
+  // DESCARGA DE AUDIO NATURALEZA BINARIA
   Future<void> _triggerDownload(Map<String, dynamic> item, {String? subFolder}) async {
     final id = item['id'] as String;
     if (_downloadProgress.containsKey(id) && _downloadProgress[id]! < 1.0) return;
@@ -132,7 +134,7 @@ class _DownloaderPanelState extends State<DownloaderPanel> {
       final manifest = await _yt.videos.streamsClient.getManifest(id);
       final audioStreamInfo = manifest.audioOnly.withHighestBitrate();
 
-      if (audioStreamInfo == null) throw Exception('No se encontró pista de audio HQ.');
+      if (audioStreamInfo == null) throw Exception('No se encontró canal de audio HQ.');
 
       final audioHandler = Provider.of<AudioHandlerImpl>(context, listen: false);
       String baseDirectory = audioHandler.scanRoot ?? '';
@@ -170,7 +172,7 @@ class _DownloaderPanelState extends State<DownloaderPanel> {
 
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Guardado: $cleanTitle.mp3'), backgroundColor: const Color(0xFF1A264F))
+        SnackBar(content: Text('Guardado completo: $cleanTitle.mp3'), backgroundColor: const Color(0xFF1A264F))
       );
 
       await audioHandler.scanAndAddRoot();
@@ -189,7 +191,6 @@ class _DownloaderPanelState extends State<DownloaderPanel> {
       padding: const EdgeInsets.all(8.0),
       child: Column(
         children: [
-          // Header del Buscador
           Row(
             children: [
               Expanded(
@@ -198,7 +199,7 @@ class _DownloaderPanelState extends State<DownloaderPanel> {
                   onSubmitted: _searchNetwork,
                   style: const TextStyle(color: Colors.white, fontSize: 13),
                   decoration: InputDecoration(
-                    hintText: 'Buscar en YouTube real...',
+                    hintText: 'Buscar música en red...',
                     hintStyle: const TextStyle(color: Colors.white38, fontSize: 13),
                     filled: true,
                     fillColor: const Color(0xFF0B1226),
@@ -223,7 +224,6 @@ class _DownloaderPanelState extends State<DownloaderPanel> {
             ],
           ),
           const SizedBox(height: 6),
-          // Selector de Categoría
           Row(
             children: ['Canciones', 'Álbumes', 'Playlists'].map((cat) {
               final isSel = _selectedCategory == cat;
@@ -245,7 +245,6 @@ class _DownloaderPanelState extends State<DownloaderPanel> {
             }).toList(),
           ),
           const SizedBox(height: 6),
-          // Lista de Resultados de Red con Miniaturas
           Expanded(
             flex: 5,
             child: _buildWindowBox(
@@ -303,7 +302,6 @@ class _DownloaderPanelState extends State<DownloaderPanel> {
             ),
           ),
           const SizedBox(height: 6),
-          // Bloque Inferior: Detalles/Sub-pistas
           Expanded(
             flex: 4,
             child: _buildWindowBox(
