@@ -2,14 +2,15 @@ name: eclipse_shell
 description: EclipseShell - High fidelity local music player with MoonShell-inspired UI.
 publish_to: 'none'
 version: 0.1.0+1
+
 environment:
   sdk: '>=3.1.0 <4.0.0'
   flutter: '>=3.7.0'
+
 dependencies:
-  dependencies:
   flutter:
     sdk: flutter
-  
+
   just_audio: 0.9.40
   audio_session: 0.1.25
   audio_service: 0.18.18
@@ -18,23 +19,9 @@ dependencies:
   hive: ^2.2.3
   hive_flutter: ^1.1.0
   path_provider: ^2.0.14
-  
-  # AÑADE ESTA LÍNEA PARA HACER LAS BÚSQUEDAS Y DESCARGAS REALES DE YT
-  youtube_explode_dart: ^2.2.2
-  # Combinación exacta y equilibrada sugerida por el compilador
-  just_audio: 0.9.40
-  audio_session: 0.1.25
-  audio_service: 0.18.18
-  provider: ^6.1.2
-  
-  # Para solicitar permisos de lectura de archivos locales
-  file_selector: ^0.9.0
-  hive: ^2.2.3
-  hive_flutter: ^1.1.0
-  path_provider: ^2.0.14
-  # Runtime storage/media permissions required to scan local folders.
   permission_handler: ^11.3.1
-  # Album art / tags extracted with a pure-Dart ID3 parser (no native dep) for CI stability.
+  youtube_explode_dart: ^2.2.2
+
 dev_dependencies:
   flutter_test:
     sdk: flutter
