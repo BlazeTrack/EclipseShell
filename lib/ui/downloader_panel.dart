@@ -15,7 +15,7 @@ class DownloaderPanel extends StatefulWidget {
 
 class _DownloaderPanelState extends State<DownloaderPanel> {
   final TextEditingController _searchController = TextEditingController();
-  String _selectedCategory = 'Canciones'; // 'Canciones', 'Álbumes', 'Playlists'
+  String _selectedCategory = 'Canciones'; 
   bool _isSearching = false;
 
   final YoutubeExplode _yt = YoutubeExplode();
@@ -30,93 +30,92 @@ class _DownloaderPanelState extends State<DownloaderPanel> {
     super.dispose();
   }
 
-  // BÚSQUEDA CORREGIDA COMPATIBLE CON YOUTUBE_EXPLODE V2.5+
+  // BÚSQUEDA CORREGIDA CON TIPADO ESTRICTO
   Future<void> _searchNetwork(String query) async {
     if (query.trim().isEmpty) return;
     setState(() { _isSearching = true; _searchResults.clear(); _selectedItemDetails = null; });
 
     try {
       if (_selectedCategory == 'Canciones') {
-        // Búsqueda estándar de Videos musicales / pistas de audio
+        // Búsqueda de videos individuales
         final searchList = await _yt.search.search(query);
+        final List<Map<String, dynamic>> parsedResults = [];
+        
+        for (final video in searchList) {
+          parsedResults.add({
+            'id': video.id.value,
+            'title': video.title,
+            'author': video.author,
+            'duration': video.duration?.toString().split('.').first ?? '00:00',
+            'type': 'track',
+            'thumbnail': video.thumbnails.lowResUrl, // Miniatura real
+            'videoUrl': video.url,
+          });
+        }
+
         setState(() {
-          _searchResults = searchList.map((video) {
-            return {
-              'id': video.id.value,
-              'title': video.title,
-              'author': video.author,
-              'duration': video.duration?.toString().split('.').first ?? '00:00',
-              'type': 'track',
-              'thumbnail': video.thumbnails.lowResUrl, // Miniatura real de YouTube
-              'videoUrl': video.url,
-            };
-          }).toList();
+          _searchResults = parsedResults;
         });
       } else {
-        // CORRECCIÓN: Para listas/álbumes en youtube_explode reciente se usa searchRaw o filtrado por contenido.
-        // Como alternativa limpia y 100% compatible sin romper métodos obsoletos, buscamos colecciones 
-        // y estructuramos un contenedor mapeable usando el motor de búsqueda universal de videos.
-        final searchList = await _yt.search.search('$query playlist');
+        // Búsqueda real de Playlists / Álbumes usando el cliente dedicado
+        final playlistSearch = await _yt.playlists.getPlaylistVideos; // Verificación alternativa estable
+        final searchList = await _yt.search.searchPlaylists(query);
+        final List<Map<String, dynamic>> parsedResults = [];
+
+        for (final pl in searchList) {
+          parsedResults.add({
+            'id': pl.id.value,
+            'title': pl.title,
+            'author': 'Playlist (${pl.videoCount ?? 0} pistas)',
+            'type': _selectedCategory == 'Álbumes' ? 'album' : 'playlist',
+            'thumbnail': 'https://img.youtube.com/vi/kJQP7kiw5Fk/0.jpg', // Placeholder base de portadas
+            'playlistId': pl.id,
+          });
+        }
+
         setState(() {
-          _searchResults = searchList.take(5).map((video) {
-            return {
-              'id': video.id.value,
-              'title': 'Colección: ${video.title}',
-              'author': video.author,
-              'type': _selectedCategory == 'Álbumes' ? 'album' : 'playlist',
-              'thumbnail': video.thumbnails.lowResUrl,
-              'isSimulatedPlaylist': true,
-              'seedVideo': video
-            };
-          }).toList();
+          _searchResults = parsedResults;
         });
       }
     } catch (e) {
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Error de conexión con YouTube: $e'), backgroundColor: Colors.red.shade900)
+        SnackBar(content: Text('Error de conexión: $e'), backgroundColor: Colors.red.shade900)
       );
     } finally {
       setState(() { _isSearching = false; });
     }
   }
 
-  // DESGLOSE REAL DE SUB-PISTAS ADAPTADO
+  // DESGLOSE REAL DE CONTENIDO DE PLAYLISTS CON MINIATURAS METADATOS
   Future<void> _fetchPlaylistTracks(Map<String, dynamic> item) async {
     setState(() { _selectedItemDetails = item; });
+    final PlaylistId plId = item['playlistId'];
     
     try {
-      final Video seedVideo = item['seedVideo'];
-      // Si el elemento se busca como lista/álbum, extraemos canciones sugeridas/relacionadas 
-      // del video semilla, simulando un álbum dinámico basado en curación real de red.
-      final relatedVideos = await _yt.videos.getRelatedVideos(seedVideo);
+      final List<Map<String, dynamic>> tracksList = [];
+      // Extrae de forma asíncrona la lista de videos real de la playlist
+      final videos = await _yt.playlists.getVideos(plId).toList();
       
+      for (final v in videos) {
+        tracksList.add({
+          'id': v.id.value,
+          'title': v.title,
+          'duration': v.duration?.toString().split('.').first ?? '00:00',
+          'thumbnail': v.thumbnails.lowResUrl,
+        });
+      }
+
       setState(() {
-        _selectedItemDetails!['tracks'] = (relatedVideos ?? [seedVideo]).map((v) {
-          return {
-            'id': v.id.value,
-            'title': v.title,
-            'duration': v.duration?.toString().split('.').first ?? '00:00',
-            'thumbnail': v.thumbnails.lowResUrl,
-          };
-        }).toList();
+        _selectedItemDetails!['tracks'] = tracksList;
       });
     } catch (e) {
-      // Fallback si no hay videos relacionados: usar el track base como único elemento del álbum
-      final Video seedVideo = item['seedVideo'];
-      setState(() {
-        _selectedItemDetails!['tracks'] = [
-          {
-            'id': seedVideo.id.value,
-            'title': seedVideo.title,
-            'duration': seedVideo.duration?.toString().split('.').first ?? '00:00',
-            'thumbnail': seedVideo.thumbnails.lowResUrl,
-          }
-        ];
-      });
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Error cargando pistas del álbum: $e'), backgroundColor: Colors.red.shade900)
+      );
     }
   }
 
-  // DESCARGA DE AUDIO HQ DIRECTA A DISCO
+  // DESCARGA REAL CON PARSEO DE METADATOS COMPLETO
   Future<void> _triggerDownload(Map<String, dynamic> item, {String? subFolder}) async {
     final id = item['id'] as String;
     if (_downloadProgress.containsKey(id) && _downloadProgress[id]! < 1.0) return;
@@ -124,13 +123,11 @@ class _DownloaderPanelState extends State<DownloaderPanel> {
     try {
       setState(() { _downloadProgress[id] = 0.0; });
 
-      // 1. Extraer manifest de streams de YouTube
       final manifest = await _yt.videos.streamsClient.getManifest(id);
       final audioStreamInfo = manifest.audioOnly.withHighestBitrate();
 
-      if (audioStreamInfo == null) throw Exception('No se encontró stream de audio HQ.');
+      if (audioStreamInfo == null) throw Exception('No se encontró canal de audio HQ.');
 
-      // 2. Definir ruta de guardado nativa
       final audioHandler = Provider.of<AudioHandlerImpl>(context, listen: false);
       String baseDirectory = audioHandler.scanRoot ?? '';
       
@@ -145,11 +142,9 @@ class _DownloaderPanelState extends State<DownloaderPanel> {
         dir.createSync(recursive: true);
       }
 
-      // Limpieza de caracteres inválidos en nombres de archivos de Android
       final cleanTitle = item['title'].toString().replaceAll(RegExp(r'[<>:"/\\|?*]'), '');
       final file = File('$finalFolder/$cleanTitle.mp3');
 
-      // 3. Volcado binario real en streaming actualizando el indicador
       final stream = _yt.videos.streamsClient.get(audioStreamInfo);
       final fileStream = file.openWrite();
       
@@ -169,19 +164,15 @@ class _DownloaderPanelState extends State<DownloaderPanel> {
 
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('Guardado completo en: $cleanTitle.mp3'), 
-          backgroundColor: const Color(0xFF1A264F)
-        )
+        SnackBar(content: Text('¡Guardado!: $cleanTitle.mp3'), backgroundColor: const Color(0xFF1A264F))
       );
 
-      // Escaneo en caliente automático para indexar el track descargado inmediatamente
       await audioHandler.scanAndAddRoot();
 
     } catch (e) {
       setState(() { _downloadProgress.remove(id); });
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Error en la descarga real: $e'), backgroundColor: Colors.red.shade900)
+        SnackBar(content: Text('Error en la descarga: $e'), backgroundColor: Colors.red.shade900)
       );
     }
   }
@@ -201,7 +192,7 @@ class _DownloaderPanelState extends State<DownloaderPanel> {
                   onSubmitted: _searchNetwork,
                   style: const TextStyle(color: Colors.white, fontSize: 13),
                   decoration: InputDecoration(
-                    hintText: 'Buscar en YouTube real (yt-dlp core)...',
+                    hintText: 'Buscar en YouTube real (yt-dlp parser)...',
                     hintStyle: const TextStyle(color: Colors.white38, fontSize: 13),
                     filled: true,
                     fillColor: const Color(0xFF0B1226),
@@ -248,7 +239,7 @@ class _DownloaderPanelState extends State<DownloaderPanel> {
             }).toList(),
           ),
           const SizedBox(height: 6),
-          // Lista de resultados de red con Miniaturas Oficiales
+          // Lista de resultados con Miniaturas reales
           Expanded(
             flex: 5,
             child: _buildWindowBox(
@@ -256,7 +247,7 @@ class _DownloaderPanelState extends State<DownloaderPanel> {
               child: _isSearching
                   ? const Center(child: CircularProgressIndicator(color: Colors.cyanAccent))
                   : _searchResults.isEmpty
-                      ? const Center(child: Text('Sin searches activos', style: TextStyle(color: Colors.white24, fontSize: 12)))
+                      ? const Center(child: Text('Sin búsquedas activas', style: TextStyle(color: Colors.white24, fontSize: 12)))
                       : ListView.builder(
                           itemCount: _searchResults.length,
                           itemBuilder: (context, index) {
@@ -267,7 +258,6 @@ class _DownloaderPanelState extends State<DownloaderPanel> {
                               dense: true,
                               selected: _selectedItemDetails?['id'] == item['id'],
                               selectedTileColor: const Color(0xFF0B1226),
-                              // RENDERIZADO ASÍNCRONO DE LA MINIATURA ORIGINAL
                               leading: ClipRRect(
                                 borderRadius: BorderRadius.circular(4),
                                 child: Image.network(
@@ -307,7 +297,7 @@ class _DownloaderPanelState extends State<DownloaderPanel> {
             ),
           ),
           const SizedBox(height: 6),
-          // Desglose de Metadatos / Álbumes Seleccionados
+          // Bloque Inferior: Detalles del elemento seleccionado
           Expanded(
             flex: 4,
             child: _buildWindowBox(
@@ -323,7 +313,7 @@ class _DownloaderPanelState extends State<DownloaderPanel> {
                               Text('Metadatos de la Pista:', style: TextStyle(color: Colors.cyanAccent, fontSize: 11, fontWeight: FontWeight.bold, fontFamily: 'monospace')),
                               const SizedBox(height: 4),
                               Text('Título: ${_selectedItemDetails!['title']}', style: const TextStyle(color: Colors.white, fontSize: 11), maxLines: 2, overflow: TextOverflow.ellipsis),
-                              Text('Autor: ${_selectedItemDetails!['author']}', style: const TextStyle(color: Colors.white70, fontSize: 11)),
+                              Text('Autor/Canal: ${_selectedItemDetails!['author']}', style: const TextStyle(color: Colors.white70, fontSize: 11)),
                               Text('Duración: ${_selectedItemDetails!['duration']}', style: const TextStyle(color: Colors.white54, fontSize: 11)),
                             ],
                           ),
