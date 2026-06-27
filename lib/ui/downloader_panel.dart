@@ -31,20 +31,39 @@ class _DownloaderPanelState extends State<DownloaderPanel> {
     super.dispose();
   }
 
-  // BÚSQUEDA ADAPTADA A VIDEO_SEARCH_LIST (COMPILACIÓN 100% VERDE)
+  // COMPROBACIÓN NATIVA DE RED ANTES DE LLAMAR A LA API
+  Future<bool> _hasNetworkAccess() async {
+    try {
+      final result = await InternetAddress.lookup('google.com');
+      return result.isNotEmpty && result[0].rawAddress.isNotEmpty;
+    } on SocketException catch (_) {
+      return false;
+    }
+  }
+
   Future<void> _searchNetwork(String query) async {
     if (query.trim().isEmpty) return;
     setState(() { _isSearching = true; _searchResults.clear(); _selectedItemDetails = null; });
 
+    // 1. Validar si el sistema operativo nos da salida real a Internet
+    final bool hasInternet = await _hasNetworkAccess();
+    if (!hasInternet) {
+      setState(() { _isSearching = false; });
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Error: El sistema operativo bloquea la conexión. Verifica permisos de red o Wi-Fi.'), 
+          backgroundColor: Colors.amber,
+          duration: Duration(seconds: 5),
+        )
+      );
+      return;
+    }
+
     try {
       final String searchQuery = _selectedCategory == 'Canciones' ? query : '$query album';
-      
-      // FIX: Usamos el tipo exacto que exige la versión 2.5.3
       final searchList = await _yt.search.search(searchQuery);
-      
       final List<Map<String, dynamic>> localResults = [];
       
-      // FIX: Dejamos que Dart infiera el 'SearchResult' dinámicamente evitando colisiones
       for (final video in searchList) {
         localResults.add({
           'id': video.id.value,
@@ -54,17 +73,15 @@ class _DownloaderPanelState extends State<DownloaderPanel> {
           'type': _selectedCategory == 'Canciones' ? 'track' : 'album',
           'thumbnail': video.thumbnails.lowResUrl, 
           'videoUrl': video.url,
-          'idValue': video.id.value, // Guardamos el string ID directo por seguridad
+          'idValue': video.id.value,
         });
       }
 
-      setState(() {
-        _searchResults = localResults;
-      });
+      setState(() { _searchResults = localResults; });
     } catch (e) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text('Error de red/conexión: $e'), 
+          content: Text('Falla en los servidores de YouTube: $e'), 
           backgroundColor: Colors.red.shade900,
           duration: const Duration(seconds: 6),
         )
@@ -74,7 +91,6 @@ class _DownloaderPanelState extends State<DownloaderPanel> {
     }
   }
 
-  // DESGLOSE SEGURO UTILIZANDO EL ID DE VIDEO DIRECTO PARA BUSCAR RELACIONADOS
   Future<void> _fetchPlaylistTracks(Map<String, dynamic> item) async {
     setState(() { _selectedItemDetails = item; });
     final String? videoId = item['idValue'] as String?;
@@ -83,8 +99,6 @@ class _DownloaderPanelState extends State<DownloaderPanel> {
 
     try {
       final List<Map<String, dynamic>> tracksList = [];
-      
-      // Obtenemos el objeto de video completo primero para poder pedir sus relacionados de forma estable
       final Video fullVideo = await _yt.videos.get(videoId);
       final relatedVideos = await _yt.videos.getRelatedVideos(fullVideo);
       
@@ -108,9 +122,7 @@ class _DownloaderPanelState extends State<DownloaderPanel> {
         });
       }
 
-      setState(() {
-        _selectedItemDetails!['tracks'] = tracksList;
-      });
+      setState(() { _selectedItemDetails!['tracks'] = tracksList; });
     } catch (e) {
       setState(() {
         _selectedItemDetails!['tracks'] = [
@@ -125,7 +137,6 @@ class _DownloaderPanelState extends State<DownloaderPanel> {
     }
   }
 
-  // DESCARGA DE AUDIO NATURALEZA BINARIA
   Future<void> _triggerDownload(Map<String, dynamic> item, {String? subFolder}) async {
     final id = item['id'] as String;
     if (_downloadProgress.containsKey(id) && _downloadProgress[id]! < 1.0) return;
