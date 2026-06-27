@@ -1,5 +1,8 @@
+import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import 'package:youtube_explode_dart/youtube_explode_dart.dart';
+import 'package:path_provider/path_provider.dart';
 import '../audio/audio_handler.dart';
 
 class DownloaderPanel extends StatefulWidget {
@@ -12,104 +15,161 @@ class DownloaderPanel extends StatefulWidget {
 
 class _DownloaderPanelState extends State<DownloaderPanel> {
   final TextEditingController _searchController = TextEditingController();
-  String _selectedCategory = 'Canciones';
+  String _selectedCategory = 'Canciones'; // Canciones (Videos), Álbumes (Playlists)
   bool _isSearching = false;
 
-  // Ajuste de descargas paralelas en cola
-  final int _maxParallelDownloads = 3;
-
+  final YoutubeExplode _yt = YoutubeExplode();
   List<Map<String, dynamic>> _searchResults = [];
   Map<String, dynamic>? _selectedItemDetails;
   final Map<String, double> _downloadProgress = {};
 
-  // Método de búsqueda optimizado para emular yt-dlp y traer miniaturas reales (HQ)
-  Future<void> _searchNetwork(String query) async {
-    if (query.trim().isEmpty) return;
-    setState(() { _isSearching = true; _searchResults.clear(); });
-    
-    // Simulación de respuesta del motor extractor dinámico yt-dlp
-    await Future.delayed(const Duration(milliseconds: 800)); 
-
-    setState(() {
-      _isSearching = false;
-      // Usamos IDs de videos musicales reales o representativos para pintar miniaturas verdaderas de los servidores de YT
-      if (_selectedCategory == 'Canciones') {
-        _searchResults = [
-          {
-            'id': 'kJQP7kiw5Fk', 
-            'title': '$query (Audio Oficial - HQ)', 
-            'author': 'VEVO Core Artist', 
-            'duration': '03:52', 
-            'type': 'track',
-            'thumbnail': 'https://img.youtube.com/vi/kJQP7kiw5Fk/0.jpg'
-          },
-          {
-            'id': '9bZkp7q19f0', 
-            'title': '$query (Remix & Extended Version)', 
-            'author': 'Eclipse Records', 
-            'duration': '04:45', 
-            'type': 'track',
-            'thumbnail': 'https://img.youtube.com/vi/9bZkp7q19f0/0.jpg'
-          }
-        ];
-      } else if (_selectedCategory == 'Álbumes') {
-        _searchResults = [
-          {
-            'id': 'album_1', 
-            'title': 'The $query Album (Full Deluxe)', 
-            'author': 'Studio Phonoteca', 
-            'type': 'album',
-            'thumbnail': 'https://img.youtube.com/vi/5qap5aO4i9A/0.jpg',
-            'tracks': [
-              {'id': 'a1_t1', 'title': '01. Intro: Awakening of $query', 'duration': '02:10'},
-              {'id': 'a1_t2', 'title': '02. Main Theme ($query)', 'duration': '05:01'},
-              {'id': 'a1_t3', 'title': '03. Outro: Solitude Space', 'duration': '03:15'}
-            ]
-          }
-        ];
-      } else {
-        _searchResults = [
-          {
-            'id': 'playlist_1', 
-            'title': 'Best Essential Hits of $query', 
-            'author': 'Sincronía Curator', 
-            'type': 'playlist',
-            'thumbnail': 'https://img.youtube.com/vi/YVkUvmDQ3HY/0.jpg',
-            'tracks': [
-              {'id': 'p1_t1', 'title': 'Track Inspirado en $query vol. 1', 'duration': '03:22'},
-              {'id': 'p1_t2', 'title': 'Track Inspirado en $query vol. 2', 'duration': '04:10'}
-            ]
-          }
-        ];
-      }
-    });
+  @override
+  void dispose() {
+    _yt.close();
+    _searchController.dispose();
+    super.dispose();
   }
 
-  // Lógica del extractor yt-dlp para la descarga de audio de máxima calidad (.flac/.mp3)
+  // BÚSQUEDA REAL EN YOUTUBE
+  Future<void> _searchNetwork(String query) async {
+    if (query.trim().isEmpty) return;
+    setState(() { _isSearching = true; _searchResults.clear(); _selectedItemDetails = null; });
+
+    try {
+      if (_selectedCategory == 'Canciones') {
+        // Busca videos de YouTube utilizando el cliente real
+        final searchList = await _yt.search.search(query);
+        setState(() {
+          _searchResults = searchList.map((video) {
+            return {
+              'id': video.id.value,
+              'title': video.title,
+              'author': video.author,
+              'duration': video.duration?.toString().split('.').first ?? '00:00',
+              'type': 'track',
+              'thumbnail': video.thumbnails.lowResUrl, // Miniatura real extraída de YouTube
+              'videoUrl': video.url,
+            };
+          }).toList();
+        });
+      } else {
+        // Para Álbumes y Playlists busca listas de reproducción de YouTube reales
+        final playlistSearch = await _yt.search.searchPlaylists(query);
+        setState(() {
+          _searchResults = playlistSearch.map((pl) {
+            return {
+              'id': pl.id.value,
+              'title': pl.title,
+              'author': 'Playlist / Colección',
+              'type': _selectedCategory == 'Álbumes' ? 'album' : 'playlist',
+              'thumbnail': 'https://img.youtube.com/vi/kJQP7kiw5Fk/0.jpg', // Placeholder dinámico para listas
+              'playlistInstance': pl,
+            };
+          }).toList();
+        });
+      }
+    } catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Error de conexión con YouTube: $e'), backgroundColor: Colors.red.shade900)
+      );
+    } finally {
+      setState(() { _isSearching = false; });
+    }
+  }
+
+  // DESGLOSE REAL DE CONTENIDO DE PLAYLISTS / ÁLBUMES
+  Future<void> _fetchPlaylistTracks(Map<String, dynamic> item) async {
+    setState(() { _selectedItemDetails = item; });
+    final Playlist plInstance = item['playlistInstance'];
+    
+    try {
+      // Trae los videos/pistas reales dentro de la playlist desde la red
+      final videos = await _yt.playlists.getVideos(plInstance.id).toList();
+      setState(() {
+        _selectedItemDetails!['tracks'] = videos.map((v) {
+          return {
+            'id': v.id.value,
+            'title': v.title,
+            'duration': v.duration?.toString().split('.').first ?? '00:00',
+            'thumbnail': v.thumbnails.lowResUrl,
+          };
+        }).toList();
+      });
+    } catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Error cargando pistas: $e'), backgroundColor: Colors.red.shade900)
+      );
+    }
+  }
+
+  // DESCARGA REAL DE AUDIO HQ Y EXTRACTOR DE METADATOS
   Future<void> _triggerDownload(Map<String, dynamic> item, {String? subFolder}) async {
     final id = item['id'] as String;
     if (_downloadProgress.containsKey(id) && _downloadProgress[id]! < 1.0) return;
 
-    setState(() { _downloadProgress[id] = 0.0; });
-    
-    // Simulación del volcado de chunks binarios de audio de alta fidelidad
-    for (int i = 1; i <= 10; i++) {
-      await Future.delayed(const Duration(milliseconds: 100));
-      setState(() { _downloadProgress[id] = i / 10.0; });
-    }
+    try {
+      setState(() { _downloadProgress[id] = 0.0; });
 
-    if (!mounted) return;
-    final audioHandler = Provider.of<AudioHandlerImpl>(context, listen: false);
-    final folder = subFolder != null 
-        ? '${audioHandler.scanRoot ?? "/storage/emulated/0/Download"}/$subFolder' 
-        : '${audioHandler.scanRoot ?? "/storage/emulated/0/Download"}';
-        
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text('yt-dlp: Extraído audio HQ -> $folder/${item['title']}.mp3'), 
-        backgroundColor: const Color(0xFF1A264F)
-      )
-    );
+      // 1. Obtener el manifest de streams de audio reales
+      final manifest = await _yt.videos.streamsClient.getManifest(id);
+      final audioStreamInfo = manifest.audioOnly.withHighestBitrate(); // Máxima calidad disponible (HQ)
+
+      if (audioStreamInfo == null) throw Exception('No se encontró pista de audio de alta fidelidad.');
+
+      // 2. Definir la ruta de guardado nativa en el dispositivo
+      final audioHandler = Provider.of<AudioHandlerImpl>(context, listen: false);
+      String baseDirectory = audioHandler.scanRoot ?? '';
+      
+      if (baseDirectory.isEmpty) {
+        final directory = await getExternalStorageDirectory() ?? await getApplicationDocumentsDirectory();
+        baseDirectory = '${directory.path}/EclipseMusic';
+      }
+      
+      final finalFolder = subFolder != null ? '$baseDirectory/$subFolder' : baseDirectory;
+      final dir = Directory(finalFolder);
+      if (!dir.existsSync()) {
+        dir.createSync(recursive: true);
+      }
+
+      // Limpiar caracteres extraños del título para evitar errores de escritura en disco
+      final cleanTitle = item['title'].toString().replaceAll(RegExp(r'[<>:"/\\|?*]'), '');
+      final file = File('$finalFolder/$cleanTitle.mp3');
+
+      // 3. Descarga del flujo binario real de YouTube actualizando el porcentaje byte a byte
+      final stream = _yt.videos.streamsClient.get(audioStreamInfo);
+      final fileStream = file.openWrite();
+      
+      double totalBytes = audioStreamInfo.size.totalBytes.toDouble();
+      double downloadedBytes = 0;
+
+      await for (final data in stream) {
+        downloadedBytes += data.length;
+        fileStream.add(data);
+        setState(() {
+          _downloadProgress[id] = (downloadedBytes / totalBytes).clamp(0.0, 1.0);
+        });
+      }
+
+      await fileStream.flush();
+      await fileStream.close();
+
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('¡yt-dlp completo! Guardado real en: ${file.path}'), 
+          backgroundColor: const Color(0xFF1A264F)
+        )
+      );
+
+      // Fuerza el escaneo automático del reproductor local para indexar la nueva canción al instante
+      await audioHandler.scanAndAddRoot();
+
+    } catch (e) {
+      setState(() { _downloadProgress.remove(id); });
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Error en la descarga real: $e'), backgroundColor: Colors.red.shade900)
+      );
+    }
   }
 
   @override
@@ -127,7 +187,7 @@ class _DownloaderPanelState extends State<DownloaderPanel> {
                   onSubmitted: _searchNetwork,
                   style: const TextStyle(color: Colors.white, fontSize: 13),
                   decoration: InputDecoration(
-                    hintText: 'Buscar en red (yt-dlp Core)...',
+                    hintText: 'Buscar en YouTube real (yt-dlp parser)...',
                     hintStyle: const TextStyle(color: Colors.white38, fontSize: 13),
                     filled: true,
                     fillColor: const Color(0xFF0B1226),
@@ -174,11 +234,11 @@ class _DownloaderPanelState extends State<DownloaderPanel> {
             }).toList(),
           ),
           const SizedBox(height: 6),
-          // Bloque Superior: Resultados de Red con Miniaturas Reales
+          // Bloque Superior: Resultados Reales de Red con Miniaturas Directas
           Expanded(
             flex: 5,
             child: _buildWindowBox(
-              title: 'NET RESULTS LIST (EXTRACTOR ACTIVE)',
+              title: 'NET RESULTS LIST (YOUTUBE LIVE)',
               child: _isSearching
                   ? const Center(child: CircularProgressIndicator(color: Colors.cyanAccent))
                   : _searchResults.isEmpty
@@ -193,16 +253,16 @@ class _DownloaderPanelState extends State<DownloaderPanel> {
                               dense: true,
                               selected: _selectedItemDetails?['id'] == item['id'],
                               selectedTileColor: const Color(0xFF0B1226),
-                              // RENDERIZADO DE LA MINIATURA DE YOUTUBE
+                              // MINIATURA VERDADERA RENDERIZADA DESDE LA RED
                               leading: ClipRRect(
                                 borderRadius: BorderRadius.circular(4),
                                 child: Image.network(
                                   item['thumbnail'] ?? '',
-                                  width: 50,
+                                  width: 52,
                                   height: 38,
                                   fit: BoxFit.cover,
                                   errorBuilder: (context, error, stackTrace) => Container(
-                                    width: 50,
+                                    width: 52,
                                     height: 38,
                                     color: Colors.white12,
                                     child: const Icon(Icons.music_video, color: Colors.white38, size: 16),
@@ -210,8 +270,19 @@ class _DownloaderPanelState extends State<DownloaderPanel> {
                                 ),
                               ),
                               title: Text(item['title'], style: const TextStyle(color: Colors.white, fontSize: 12), maxLines: 1, overflow: TextOverflow.ellipsis),
-                              subtitle: isDl ? LinearProgressIndicator(value: progress, color: Colors.cyanAccent, minHeight: 2) : Text(item['author'], style: const TextStyle(color: Colors.white38, fontSize: 10)),
-                              onTap: () { setState(() { _selectedItemDetails = item; }); },
+                              subtitle: isDl 
+                                  ? Padding(
+                                      padding: const EdgeInsets.only(top: 4.0),
+                                      child: LinearProgressIndicator(value: progress, color: Colors.cyanAccent, minHeight: 3),
+                                    )
+                                  : Text('${item['author']} · ${item['duration'] ?? ''}', style: const TextStyle(color: Colors.white38, fontSize: 10)),
+                              onTap: () {
+                                if (item['type'] == 'track') {
+                                  setState(() { _selectedItemDetails = item; });
+                                } else {
+                                  _fetchPlaylistTracks(item);
+                                }
+                              },
                               trailing: IconButton(
                                 icon: Icon(isDl ? Icons.hourglass_top : Icons.download_sharp, color: Colors.greenAccent, size: 16), 
                                 onPressed: () => _triggerDownload(item, subFolder: item['type'] != 'track' ? item['title'] : null)
@@ -222,41 +293,61 @@ class _DownloaderPanelState extends State<DownloaderPanel> {
             ),
           ),
           const SizedBox(height: 6),
-          // Bloque Inferior: Detalles de Álbum o Playlist Seleccionado
+          // Bloque Inferior: Detalles de Álbum o Playlist Seleccionado (Sub-pistas reales)
           Expanded(
             flex: 4,
             child: _buildWindowBox(
               title: 'SELECTED ELEMENT TRACKS INFO',
-              child: _selectedItemDetails == null || _selectedItemDetails!['type'] == 'track'
-                  ? const Center(child: Text('[Selecciona un álbum o playlist arriba para desglosar sus pistas]', style: TextStyle(color: Colors.white24, fontSize: 11, fontStyle: FontStyle.italic)))
-                  : Column(
-                      crossAxisAlignment: CrossAxisAlignment.stretch,
-                      children: [
-                        Padding(
-                          padding: const EdgeInsets.all(4.0), 
-                          child: Text('Contenido: ${_selectedItemDetails!['title']}', style: const TextStyle(color: Colors.cyanAccent, fontSize: 11, fontWeight: FontWeight.bold), maxLines: 1)
-                        ),
-                        Expanded(
-                          child: ListView.builder(
-                            itemCount: (_selectedItemDetails!['tracks'] as List).length,
-                            itemBuilder: (context, idx) {
-                              final sub = (_selectedItemDetails!['tracks'] as List)[idx];
-                              final subProgress = _downloadProgress[sub['id']];
-                              final isSubDl = subProgress != null && subProgress < 1.0;
-                              return ListTile(
-                                dense: true,
-                                title: Text(sub['title'], style: const TextStyle(color: Colors.white70, fontSize: 11)),
-                                subtitle: isSubDl ? LinearProgressIndicator(value: subProgress, color: Colors.greenAccent) : Text(sub['duration'], style: const TextStyle(color: Colors.white24, fontSize: 10)),
-                                trailing: IconButton(
-                                  icon: Icon(isSubDl ? Icons.sync : Icons.download_rounded, color: Colors.white54, size: 14), 
-                                  onPressed: () => _triggerDownload({'id': sub['id'], 'title': sub['title']}, subFolder: _selectedItemDetails!['title'])
-                                ),
-                              );
-                            },
+              child: _selectedItemDetails == null
+                  ? const Center(child: Text('[Selecciona un ítem arriba para desglosar sus metadatos]', style: TextStyle(color: Colors.white24, fontSize: 11, fontStyle: FontStyle.italic)))
+                  : _selectedItemDetails!['type'] == 'track'
+                      ? Padding(
+                          padding: const EdgeInsets.all(8.0),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text('Metadatos de la Pista:', style: TextStyle(color: Colors.cyanAccent, fontSize: 11, fontWeight: FontWeight.bold, fontFamily: 'monospace')),
+                              const SizedBox(height: 4),
+                              Text('Título: ${_selectedItemDetails!['title']}', style: const TextStyle(color: Colors.white, fontSize: 11), maxLines: 2, overflow: TextOverflow.ellipsis),
+                              Text('Canal/Autor: ${_selectedItemDetails!['author']}', style: const TextStyle(color: Colors.white70, fontSize: 11)),
+                              Text('Duración: ${_selectedItemDetails!['duration']}', style: const TextStyle(color: Colors.white54, fontSize: 11)),
+                            ],
                           ),
-                        ),
-                      ],
-                    ),
+                        )
+                      : _selectedItemDetails!['tracks'] == null
+                          ? const Center(child: CircularProgressIndicator(color: Colors.cyanAccent))
+                          : Column(
+                              crossAxisAlignment: CrossAxisAlignment.stretch,
+                              children: [
+                                Padding(
+                                  padding: const EdgeInsets.all(4.0), 
+                                  child: Text('Contenido: ${_selectedItemDetails!['title']}', style: const TextStyle(color: Colors.cyanAccent, fontSize: 11, fontWeight: FontWeight.bold), maxLines: 1)
+                                ),
+                                Expanded(
+                                  child: ListView.builder(
+                                    itemCount: (_selectedItemDetails!['tracks'] as List).length,
+                                    itemBuilder: (context, idx) {
+                                      final sub = (_selectedItemDetails!['tracks'] as List)[idx];
+                                      final subProgress = _downloadProgress[sub['id']];
+                                      final isSubDl = subProgress != null && subProgress < 1.0;
+                                      return ListTile(
+                                        dense: true,
+                                        leading: ClipRRect(
+                                          borderRadius: BorderRadius.circular(2),
+                                          child: Image.network(sub['thumbnail'] ?? '', width: 36, height: 26, fit: BoxFit.cover),
+                                        ),
+                                        title: Text(sub['title'], style: const TextStyle(color: Colors.white70, fontSize: 11), maxLines: 1, overflow: TextOverflow.ellipsis),
+                                        subtitle: isSubDl ? LinearProgressIndicator(value: subProgress, color: Colors.greenAccent) : Text(sub['duration'], style: const TextStyle(color: Colors.white24, fontSize: 10)),
+                                        trailing: IconButton(
+                                          icon: Icon(isSubDl ? Icons.sync : Icons.download_rounded, color: Colors.white54, size: 14), 
+                                          onPressed: () => _triggerDownload({'id': sub['id'], 'title': sub['title']}, subFolder: _selectedItemDetails!['title'])
+                                        ),
+                                      );
+                                    },
+                                  ),
+                                ),
+                              ],
+                            ),
             ),
           )
         ],

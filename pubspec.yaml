@@ -6,9 +6,21 @@ environment:
   sdk: '>=3.1.0 <4.0.0'
   flutter: '>=3.7.0'
 dependencies:
+  dependencies:
   flutter:
     sdk: flutter
   
+  just_audio: 0.9.40
+  audio_session: 0.1.25
+  audio_service: 0.18.18
+  provider: ^6.1.2
+  file_selector: ^0.9.0
+  hive: ^2.2.3
+  hive_flutter: ^1.1.0
+  path_provider: ^2.0.14
+  
+  # AÑADE ESTA LÍNEA PARA HACER LAS BÚSQUEDAS Y DESCARGAS REALES DE YT
+  youtube_explode_dart: ^2.2.2
   # Combinación exacta y equilibrada sugerida por el compilador
   just_audio: 0.9.40
   audio_session: 0.1.25
